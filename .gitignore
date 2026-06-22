@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.DS_Store
+
+# Rust
+src-tauri/target/
+
+# Android (генерируется командой tauri android init)
+src-tauri/gen/android/
+
+# iOS (генерируется командой tauri ios init)
+src-tauri/gen/apple/
+
+# Подписи — НИКОГДА не коммитить в репо!
+src-tauri/gen/android/keystore.properties
+*.jks
+*.keystore
