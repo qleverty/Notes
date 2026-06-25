@@ -1,24 +1,31 @@
-// lib.rs — сюда пишем всю бизнес-логику.
-// main.rs трогать не нужно (он просто вызывает run() отсюда).
+mod app_state;
+mod commands;
+mod projects;
 
-// ─── Команды Tauri ──────────────────────────────────────────────────────────
-// Каждая pub fn с атрибутом #[tauri::command] становится вызываемой из JS
-// через: invoke("имя_функции", { аргументы })
+use app_state::AppState;
 
-/// Простое приветствие — демонстрирует JS ↔ Rust IPC.
-/// Замени эту функцию (или добавь рядом) своей реальной логикой.
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Привет, {}! Это сообщение пришло из Rust 🦀", name)
-}
-
-// ─── Точка входа ────────────────────────────────────────────────────────────
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        // Регистрируем все команды здесь:
-        .invoke_handler(tauri::generate_handler![greet])
+        .manage(AppState::new())
+        .invoke_handler(tauri::generate_handler![
+            commands::init_app,
+            commands::switch_project,
+            commands::create_project,
+            commands::rename_project,
+            commands::delete_project,
+            commands::get_project_data,
+            commands::create_note,
+            commands::read_note,
+            commands::update_note_content,
+            commands::move_element,
+            commands::set_color,
+            commands::delete_element,
+            commands::create_wire,
+            commands::delete_wire,
+            commands::flush,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

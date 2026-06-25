@@ -1,129 +1,281 @@
-/* =====================
-   Основа
-   ===================== */
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
 :root {
-  --bg: #0f1117;
-  --surface: #1a1d27;
-  --border: #2e3141;
-  --accent: #5e81f4;
-  --accent-hover: #7b9bf7;
-  --text: #e8eaf6;
-  --text-muted: #7880a0;
-  --radius: 12px;
+    --note-base-color: hsl(0, 70%, 90%);
+    --note-dark-color: hsl(0, 70%, 80%);
 }
 
 body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: 'Segoe UI', system-ui, sans-serif;
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+    margin: 0; padding: 0;
+    background-color: #ffffff;
+    font-family: 'Segoe UI', sans-serif;
+    overflow: hidden;
+    height: 100vh; width: 100vw;
 }
 
-/* =====================
-   Layout
-   ===================== */
-.container {
-  width: 100%;
-  max-width: 480px;
-  padding: 2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
+#canvas {
+    position: absolute; top: 0; left: 0;
+    transform-origin: 0 0;
+    width: 0; height: 0;
 }
 
-h1 {
-  font-size: 2rem;
-  font-weight: 700;
-  letter-spacing: -0.5px;
-  text-align: center;
-  color: var(--accent);
+/* ===== NOTES ===== */
+.note {
+    position: absolute;
+    width: 250px; height: 250px;
+    min-width: 200px; min-height: 150px;
+    display: flex; flex-direction: column;
+    box-shadow: 0px 5px 10px rgba(0,0,0,0.1);
+    border: 1px solid rgba(0,0,0,0.05);
+    background-color: var(--note-base-color);
+    z-index: 1; resize: both; overflow: hidden;
 }
 
-/* =====================
-   Card
-   ===================== */
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+.note-header {
+    height: 30px; cursor: move;
+    display: flex; align-items: center; padding: 0 10px;
+    flex-shrink: 0; position: relative;
+    background-color: var(--note-dark-color); z-index: 10;
 }
 
-.card p {
-  color: var(--text-muted);
-  font-size: 0.95rem;
+.note-content-wrapper {
+    flex-grow: 1; overflow: hidden;
+    display: flex; flex-direction: column;
+    border-bottom-right-radius: 4px;
+    resize: none;
 }
 
-/* =====================
-   Input
-   ===================== */
-input[type="text"] {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
-  font-size: 1rem;
-  padding: 0.65rem 0.9rem;
-  width: 100%;
-  outline: none;
-  transition: border-color 0.2s;
+.note-title {
+    font-size: 15px; font-weight: normal;
+    color: rgba(0,0,0,0.7);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    outline: none; width: calc(100% - 65px); user-select: none;
+}
+.note-title[contenteditable="true"] { user-select: text; cursor: text; }
+.note-title:empty::before { content: "Заголовок..."; color: rgba(0,0,0,0.3); }
+
+.header-btn {
+    position: absolute; top: 7px;
+    width: 16px; height: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 15; opacity: 0.6; transition: opacity 0.2s;
+}
+.header-btn:hover { opacity: 1; }
+.delete-btn { right: 7px; }
+.delete-btn::before {
+    content: ""; width: 10px; height: 1px;
+    background-color: rgba(0,0,0,0.8);
+}
+.color-btn { right: 30px; }
+.color-btn svg { width: 12px; height: 12px; fill: rgba(0,0,0,0.7); }
+
+/* Color picker */
+.color-palette-holder {
+    position: absolute; top: 35px; right: 10px;
+    transform: scale(0); transform-origin: top right;
+    width: 110px; height: 110px;
+    background: white; border-radius: 50%;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    z-index: 1000;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.2s;
+    opacity: 0; pointer-events: none;
+}
+.color-palette-holder.active { transform: scale(1); opacity: 1; pointer-events: auto; }
+.color-ring-container {
+    position: relative; width: 90px; height: 90px;
+    display: flex; align-items: center; justify-content: center;
+}
+.color-ring {
+    width: 100%; height: 100%; border-radius: 50%;
+    background: conic-gradient(
+        from 0deg,
+        hsl(0,100%,50%), hsl(60,100%,50%), hsl(120,100%,50%),
+        hsl(180,100%,50%), hsl(240,100%,50%), hsl(300,100%,50%), hsl(360,100%,50%)
+    );
+    -webkit-mask-image: radial-gradient(transparent 30px, black 31px, black 44px, transparent 45px);
+    mask-image: radial-gradient(transparent 30px, black 31px, black 44px, transparent 45px);
+}
+.ring-line { position: absolute; border-radius: 50%; border: 1px solid white; pointer-events: none; z-index: 2; }
+.line-outer { width: 89px; height: 89px; }
+.line-inner { width: 61px; height: 61px; }
+.color-handle {
+    position: absolute; width: 16px; height: 16px;
+    background: white; border: 1px solid rgba(0,0,0,0.2); border-radius: 50%;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%) rotate(-90deg) translate(37.5px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2); z-index: 10; pointer-events: none;
 }
 
-input[type="text"]:focus {
-  border-color: var(--accent);
+/* Note content */
+.note-content {
+    flex-grow: 1; padding: 10px; outline: none;
+    overflow-y: auto; overflow-x: hidden; word-wrap: break-word;
+    font-size: 14px; line-height: 1.5; color: #333;
+    white-space: pre-wrap;
+    background-color: rgba(255,255,255,0.2);
+    scrollbar-width: thin; scrollbar-color: var(--note-dark-color) transparent;
+    resize: none;
+}
+.note-content::-webkit-scrollbar { width: 6px; }
+.note-content::-webkit-scrollbar-track { background: transparent; }
+.note-content::-webkit-scrollbar-thumb {
+    background-color: var(--note-dark-color); border-radius: 10px;
+    border: 1px solid var(--note-base-color);
+}
+.note-content::-webkit-scrollbar-thumb:hover { background-color: rgba(0,0,0,0.3); }
+.note-content::-webkit-resizer { display: none; }
+.note-content::-webkit-scrollbar-corner { background: transparent; display: none; }
+.note-content p { margin: 0 0 10px 0; }
+.note-content h1, .note-content h2, .note-content h3 { margin: 10px 0 5px 0; font-size: 1.1em; }
+.note-content:empty::before {
+    content: "Текст..."; color: rgba(0,0,0,0.3);
+    pointer-events: none; display: block;
 }
 
-input[type="text"]::placeholder {
-  color: var(--text-muted);
+/* Add note button */
+#add-btn {
+    position: fixed; bottom: 30px; left: 30px;
+    width: 60px; height: 60px;
+    background-color: #333; color: white;
+    border: none; font-size: 36px; cursor: pointer;
+    z-index: 9999; transition: transform 0.2s; border-radius: 0;
+}
+#add-btn:hover { transform: scale(1.1); background-color: #000; }
+
+body.thread-dragging,
+body.thread-dragging * { cursor: crosshair !important; }
+
+
+/* ===== PROJECT DROPDOWN ===== */
+
+#proj-root {
+    position: fixed; top: 12px; left: 12px;
+    z-index: 9998;
+    font: 13px 'Segoe UI', sans-serif;
+    color: #111;
+    user-select: none;
+}
+#proj-root input { user-select: text; }
+
+#proj-selector {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 5px 10px; gap: 8px;
+    background: white; cursor: pointer;
+    box-sizing: border-box; width: 100%;
+}
+#proj-root.is-open #proj-selector {
+    box-shadow:
+        -1px 0 0 0 rgba(0,0,0,0.14),
+         1px 0 0 0 rgba(0,0,0,0.14),
+         0 -1px 0 0 rgba(0,0,0,0.14);
 }
 
-/* =====================
-   Button
-   ===================== */
-button {
-  background: var(--accent);
-  border: none;
-  border-radius: 8px;
-  color: #fff;
-  cursor: pointer;
-  font-size: 0.95rem;
-  font-weight: 600;
-  padding: 0.7rem 1.2rem;
-  transition: background 0.2s, transform 0.1s;
+#proj-selector-name {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex: 1; min-width: 0; color: #111;
 }
 
-button:hover {
-  background: var(--accent-hover);
+#proj-arrow {
+    color: #777; font-size: 10px; flex-shrink: 0;
+    transition: transform 0.15s;
+}
+#proj-root.is-open #proj-arrow { transform: rotate(180deg); }
+
+#proj-list-wrap {
+    display: none; flex-direction: column;
+    background: white;
+    box-shadow:
+        -1px 0 0 0 rgba(0,0,0,0.14),
+         1px 0 0 0 rgba(0,0,0,0.14),
+         0  1px 0 0 rgba(0,0,0,0.14);
+    width: 100%; box-sizing: border-box;
 }
 
-button:active {
-  transform: scale(0.98);
+#proj-list {
+    overflow-y: auto;
+    max-height: min(197px, calc(100vh - 90px));
+    scrollbar-width: thin; scrollbar-color: #ddd transparent;
+}
+#proj-list::-webkit-scrollbar { width: 4px; }
+#proj-list::-webkit-scrollbar-track { background: transparent; }
+#proj-list::-webkit-scrollbar-thumb { background: #ddd; border-radius: 2px; }
+#proj-list::-webkit-scrollbar-thumb:hover { background: #bbb; }
+
+.proj-item {
+    display: flex; align-items: center;
+    padding: 0 8px; height: 30px; cursor: pointer;
+    position: relative; box-sizing: border-box;
+}
+.proj-item:hover { background: #f4f4f4; }
+.proj-item.is-ghost { opacity: 0.3; pointer-events: none; }
+.proj-item.drag-above { border-top: 2px solid #111; }
+.proj-item.drag-below { border-bottom: 2px solid #111; }
+
+.proj-item-name {
+    flex: 1; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    color: #111; pointer-events: none;
+    padding-right: 0;
+}
+.proj-item:hover .proj-item-name { padding-right: 46px; }
+
+.proj-item-edit-row {
+    display: flex; align-items: center; gap: 4px; width: 100%;
+}
+.proj-item-edit-input {
+    flex: 1; min-width: 0;
+    border: none; border-bottom: 1px solid #aaa;
+    outline: none; background: transparent;
+    font: 13px 'Segoe UI', sans-serif; color: #111; padding: 1px 0;
 }
 
-/* =====================
-   Response block
-   ===================== */
-.response {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-left: 4px solid var(--accent);
-  border-radius: var(--radius);
-  padding: 1rem 1.25rem;
-  font-size: 1.05rem;
+.proj-item-btns {
+    position: absolute; right: 6px;
+    display: none; align-items: center; gap: 2px;
+    background: #f4f4f4;
+}
+.proj-item:hover .proj-item-btns { display: flex; }
+
+.proj-item-btn {
+    width: 18px; height: 18px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; border-radius: 3px;
+    color: #777; font-size: 11px; flex-shrink: 0; line-height: 1;
+}
+.proj-item-btn:hover { background: rgba(0,0,0,0.1); color: #111; }
+.proj-item-btn.is-del:hover { color: #c00; }
+
+.proj-confirm-btn {
+    width: 17px; height: 17px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; border-radius: 0; flex-shrink: 0;
+    background: #333; color: white;
+}
+.proj-confirm-btn:hover { background: #000; }
+
+#proj-add-area {
+    border-top: 1px solid rgba(0,0,0,0.07);
+    padding: 2px 8px 4px; flex-shrink: 0;
+}
+#proj-add-btn {
+    display: block; width: 100%; background: none; border: none;
+    cursor: pointer; color: #777;
+    font: 12px 'Segoe UI', sans-serif;
+    padding: 5px 0; text-align: left;
+}
+#proj-add-btn:hover { color: #111; }
+#proj-add-input-row { display: none; align-items: center; gap: 4px; padding: 3px 0; }
+#proj-add-input {
+    flex: 1; min-width: 0;
+    border: none; border-bottom: 1px solid #aaa;
+    outline: none; background: transparent;
+    font: 12px 'Segoe UI', sans-serif; color: #111; padding: 1px 0;
 }
 
-.response.hidden {
-  display: none;
+#proj-drag-ghost {
+    position: fixed; pointer-events: none; z-index: 99999;
+    background: white; box-shadow: 0 3px 12px rgba(0,0,0,0.15);
+    font: 13px 'Segoe UI', sans-serif; color: #111;
+    padding: 0 8px; height: 30px; line-height: 30px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    display: none; box-sizing: border-box;
 }

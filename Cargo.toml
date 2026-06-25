@@ -1,0 +1,3 @@
+[workspace]
+members = ["notes-api", "src-tauri"]
+resolver = "2"
