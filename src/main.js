@@ -2,6 +2,8 @@
 // CANVAS / PAN / ZOOM
 // =============================================
 
+const invoke = window.__TAURI__?.core?.invoke ?? (() => Promise.resolve());
+
 const addBtn = document.getElementById('add-btn');
 const canvas = document.getElementById('canvas');
 let zIndexCounter = 10;
@@ -369,12 +371,18 @@ function createNote() {
         content.style.whiteSpace = 'normal';
         content.innerHTML = marked.parse(noteData.rawMarkdown);
     });
+    content.addEventListener('input', () => {
+        saveBuffer.schedule(noteId, title.innerText, content.innerText);
+    });
 
     header.addEventListener('dblclick', (e) => {
         if (e.target.closest('.header-btn') || e.target.closest('.color-palette-holder')) return;
         title.contentEditable = 'true'; title.focus();
     });
     title.addEventListener('blur', () => { title.contentEditable = 'false'; });
+    title.addEventListener('input', () => {
+        saveBuffer.schedule(noteId, title.innerText, noteData.rawMarkdown);
+    });
 
     colorBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -477,7 +485,6 @@ async function loadNoteBody(id, noteData) {
     if (!noteData.tauriId) return;
     noteData.bodyLoaded = true;
     try {
-        const { invoke } = window.__TAURI__.core;
         const note = await invoke('read_note', { id: noteData.tauriId });
         noteData.rawMarkdown = note.body;
         const titleEl = noteData.el.querySelector('.note-title');
@@ -519,6 +526,44 @@ window.addEventListener('resize', () => {
 });
 
 createNote();
+
+// =============================================
+// SAVE BUFFER
+// =============================================
+
+class SaveBuffer {
+    constructor() { this._pending = new Map(); }
+
+    schedule(id, title, body) {
+        const existing = this._pending.get(id);
+        if (existing?.debounceTimer) clearTimeout(existing.debounceTimer);
+        const maxTimer = existing?.maxTimer ?? setTimeout(() => this._flush(id), SAVE_BUFFER.MAX_PENDING_MS);
+        const debounceTimer = setTimeout(() => this._flush(id), SAVE_BUFFER.DEBOUNCE_MS);
+        this._pending.set(id, { title, body, debounceTimer, maxTimer });
+    }
+
+    async flushAll() {
+        await Promise.all([...this._pending.keys()].map(id => this._flush(id)));
+    }
+
+    async _flush(id) {
+        const entry = this._pending.get(id);
+        if (!entry) return;
+        clearTimeout(entry.debounceTimer);
+        clearTimeout(entry.maxTimer);
+        this._pending.delete(id);
+        // Guard: skip until tauriId is assigned in integration chapter
+        const noteData = [...notesMap.values()].find(n => n.tauriId === id);
+        if (!noteData) return;
+        try {
+            await invoke('update_note_content', { id, title: entry.title, body: entry.body });
+        } catch (e) {
+            console.error('SaveBuffer flush failed for note', id, e);
+        }
+    }
+}
+
+const saveBuffer = new SaveBuffer();
 
 // =============================================
 // PROJECT DROPDOWN
@@ -619,15 +664,11 @@ function appendItem(name, realIdx) {
     projList.appendChild(item);
 
     // Click item → switch project
-    item.addEventListener('click', (e) => {
+    item.addEventListener('click', async (e) => {
         if (e.target.closest('.proj-item-btns') || e.target.closest('.proj-item-edit-row')) return;
         if (dndState && dndState.dragging) return;
-        currentProject = name;
-        projSelectorName.textContent = name;
-        syncWidth();
-        renderList();
         closeDropdown();
-        // TODO: tauri invoke('switch_project', { name })
+        await switchProject(name);
     });
 
     // Pencil → start rename
@@ -885,3 +926,27 @@ function applyDrop() {
 // ===== Init =====
 projSelectorName.textContent = currentProject;
 syncWidth();
+
+// =============================================
+// PROJECT SWITCHING & WINDOW CLOSE
+// =============================================
+
+async function switchProject(name) {
+    await saveBuffer.flushAll();
+    await invoke('flush');
+    await invoke('switch_project', { name });
+    currentProject = name;
+    projSelectorName.textContent = name;
+    syncWidth();
+    renderList();
+    // TODO: await loadCurrentProject() — chapter 6
+}
+
+if (window.__TAURI__?.window) {
+    window.__TAURI__.window.getCurrentWindow().onCloseRequested(async (event) => {
+        event.preventDefault();
+        await saveBuffer.flushAll();
+        await invoke('flush');
+        window.__TAURI__.window.getCurrentWindow().close();
+    });
+}
