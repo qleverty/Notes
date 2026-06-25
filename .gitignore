@@ -4,6 +4,7 @@ dist/
 
 # Rust
 src-tauri/target/
+target/
 
 # Android (генерируется командой tauri android init)
 src-tauri/gen/android/
