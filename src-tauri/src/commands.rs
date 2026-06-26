@@ -78,6 +78,12 @@ fn flush_current(state: &AppState) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Serialize)]
+pub struct InitDto {
+    pub projects: Vec<String>,
+    pub current:  String,
+}
+
 // =============================================
 // CHAPTER 2 — Project commands
 // =============================================
@@ -85,25 +91,27 @@ fn flush_current(state: &AppState) -> Result<(), String> {
 /// Called once on app start. Returns sorted list of project names
 /// and opens the first one (or creates "Default" if none exist).
 #[tauri::command]
-pub fn init_app(state: State<AppState>) -> Result<Vec<String>, String> {
+pub fn init_app(state: State<AppState>) -> Result<InitDto, String> {
     let mut names = projects::list_projects().map_err(|e| e.to_string())?;
 
-    if names.is_empty() {
+    let current = if names.is_empty() {
         let path = projects::project_path("Default")
             .ok_or("Cannot resolve AppData")?;
         let f = NotesFile::create(&path).map_err(|e| e.to_string())?;
         let mut lock = state.current.lock().unwrap();
         *lock = Some(OpenProject { name: "Default".into(), file: f });
         names.push("Default".into());
+        "Default".to_string()
     } else {
         let first = names[0].clone();
         let path  = projects::project_path(&first).ok_or("Cannot resolve AppData")?;
         let f     = NotesFile::open(&path).map_err(|e| e.to_string())?;
         let mut lock = state.current.lock().unwrap();
-        *lock = Some(OpenProject { name: first, file: f });
-    }
+        *lock = Some(OpenProject { name: first.clone(), file: f });
+        first
+    };
 
-    Ok(names)
+    Ok(InitDto { projects: names, current })
 }
 
 /// Save current project and open another one.

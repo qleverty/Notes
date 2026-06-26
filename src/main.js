@@ -75,13 +75,25 @@ document.addEventListener('mouseup', (e) => {
 });
 
 // =============================================
+// ERROR DISPLAY (stub — полировка в главе 11)
+// =============================================
+
+function showError(msg) {
+    console.error('[Notes]', msg);
+    // TODO: toast UI в главе 11
+}
+
+// =============================================
 // THREAD SYSTEM
 // =============================================
 
-let noteIdCounter = 0;
+let noteIdCounter = 0; // kept for legacy wire drag — remove in chapter 8
 const notesMap = new Map(); // noteId -> { el, anchors, anchorSVG, threadSVG, threadG, previewG }
 let connections = [];
 let dragState = null; // thread drag state
+
+// wiresMap: id (number) -> WireDto (from backend)
+const wiresMap = new Map();
 
 function getAnchorPos(el, side) {
     const r = el.getBoundingClientRect();
@@ -114,22 +126,39 @@ function getNearestAnchorSide(noteEl, refPos) {
 
 function drawConnections() {
     notesMap.forEach(({ threadG }) => { threadG.innerHTML = ''; });
+
+    // wiresMap — authoritative source (populated from backend)
+    wiresMap.forEach(wire => {
+        const a = notesMap.get(wire.from_id);
+        const b = notesMap.get(wire.to_id);
+        if (!a || !b) return;
+        const sideNames = ['top', 'right', 'bottom', 'left'];
+        const p1 = getAnchorPos(a.el, sideNames[wire.from_side]);
+        const p2 = getAnchorPos(b.el, sideNames[wire.to_side]);
+        _drawWirePath(a.threadG, p1, p2, 'rgba(90,45,12,0.6)', '1.8', 'none');
+    });
+
+    // connections[] — local drag-created wires (pre-integration)
     connections.forEach(conn => {
         const a = notesMap.get(conn.fromId);
         const b = notesMap.get(conn.toId);
         if (!a || !b) return;
         const p1 = getAnchorPos(a.el, conn.fromSide);
         const p2 = getAnchorPos(b.el, conn.toSide);
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', screenToCanvas2(p1, p2));
-        path.setAttribute('fill', 'none');
-        path.setAttribute('stroke', '#5a2d0c');
-        path.setAttribute('stroke-opacity', '0.6');
-        path.setAttribute('stroke-width', '1.8');
-        path.setAttribute('stroke-linecap', 'round');
-        path.setAttribute('vector-effect', 'non-scaling-stroke');
-        a.threadG.appendChild(path);
+        _drawWirePath(a.threadG, p1, p2, 'rgba(90,45,12,0.6)', '1.8', 'none');
     });
+}
+
+function _drawWirePath(g, p1, p2, stroke, width, dasharray) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', screenToCanvas2(p1, p2));
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', stroke);
+    path.setAttribute('stroke-width', width);
+    path.setAttribute('stroke-dasharray', dasharray);
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('vector-effect', 'non-scaling-stroke');
+    g.appendChild(path);
 }
 
 function drawPreview() {
@@ -291,34 +320,65 @@ document.addEventListener('mouseup', (e) => {
 // NOTES
 // =============================================
 
-function createNote() {
-    const noteId = String(++noteIdCounter);
-    zIndexCounter += 2;
-    const noteZ = zIndexCounter;
+// =============================================
+// HELPERS
+// =============================================
 
+// IDs: backend returns u64 numbers; JS map keys and dataset values are strings.
+// Convert to Number only when calling invoke.
+function toInvokeId(id) { return Number(id); }
+
+function rgbToHsl([r, g, b]) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    if (max === min) return [0, 0, Math.round(l * 100)];
+    const d = max - min;
+    const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    let h;
+    if (max === r)      h = (g - b) / d + (g < b ? 6 : 0);
+    else if (max === g) h = (b - r) / d + 2;
+    else                h = (r - g) / d + 4;
+    return [Math.round(h * 60), Math.round(s * 100), Math.round(l * 100)];
+}
+
+function hslToRgb(h, s, l) {
+    s /= 100; l /= 100;
+    const k = n => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = n => Math.round((l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)))) * 255);
+    return [f(0), f(8), f(4)];
+}
+
+// =============================================
+// NOTE ELEMENT BUILDERS
+// =============================================
+
+function createThreadSVG(noteZ) {
     const threadSVG = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     threadSVG.style.cssText = 'position:absolute;left:0;top:0;width:1px;height:1px;overflow:visible;pointer-events:none;';
     threadSVG.style.zIndex = noteZ - 1;
     canvas.appendChild(threadSVG);
     const threadG  = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     const previewG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    threadSVG.appendChild(threadG); threadSVG.appendChild(previewG);
+    threadSVG.appendChild(threadG);
+    threadSVG.appendChild(previewG);
+    return { threadSVG, threadG, previewG };
+}
 
-    const noteX = (113 - panX) / zoom;
-    const noteY = (window.innerHeight - 30 - 250 - panY) / zoom;
-
-    const note = document.createElement('div');
-    note.className = 'note';
-    note.dataset.noteId = noteId;
-    note.style.left  = noteX + 'px';
-    note.style.top   = noteY + 'px';
-    note.style.zIndex = noteZ;
-
-    const randomHue = Math.floor(Math.random() * 360);
-    note.style.setProperty('--note-base-color', `hsl(${randomHue}, 70%, 90%)`);
-    note.style.setProperty('--note-dark-color', `hsl(${randomHue}, 70%, 80%)`);
-
-    note.innerHTML = `
+// Builds the div.note for a text note — extend with more builders for images etc.
+function buildNoteElement(id, x, y, w, h, color) {
+    const [hue, sat, lig] = rgbToHsl(color);
+    const el = document.createElement('div');
+    el.className = 'note';
+    el.dataset.noteId = String(id);
+    el.style.left   = x + 'px';
+    el.style.top    = y + 'px';
+    el.style.width  = w + 'px';
+    el.style.height = h + 'px';
+    el.style.setProperty('--note-base-color', `hsl(${hue}, ${sat}%, ${lig + 10}%)`);
+    el.style.setProperty('--note-dark-color',  `hsl(${hue}, ${sat}%, ${lig}%)`);
+    el.innerHTML = `
         <div class="note-header">
             <div class="note-title" contenteditable="false"></div>
             <div class="header-btn color-btn" title="Цвет">
@@ -338,33 +398,29 @@ function createNote() {
             <div class="note-content" contenteditable="true"></div>
         </div>`;
 
-    canvas.appendChild(note);
-    const { anchors: anchorDots, svg: anchorSVG } = createAnchorDots(noteId, note);
-    notesMap.set(noteId, {
-        el: note,
-        anchors: anchorDots, anchorSVG, threadSVG, threadG, previewG,
-        slot: { x: noteX, y: noteY, w: APP_CONSTANTS.DEFAULT_NOTE_W, h: APP_CONSTANTS.DEFAULT_NOTE_H },
-        bodyLoaded: false,
-        tauriId: null,      // set after backend integration
-        rawMarkdown: '',
-    });
-    makeDraggable(note);
+    // Position color handle to match loaded hue
+    const handle = el.querySelector('.color-handle');
+    handle.style.transform = `translate(-50%, -50%) rotate(${hue - 90}deg) translate(37.5px)`;
+    return el;
+}
 
-    const title              = note.querySelector('.note-title');
-    const content            = note.querySelector('.note-content');
-    const header             = note.querySelector('.note-header');
-    const delBtn             = note.querySelector('.delete-btn');
-    const colorBtn           = note.querySelector('.color-btn');
-    const paletteHolder      = note.querySelector('.color-palette-holder');
-    const colorRingContainer = note.querySelector('.color-ring-container');
-    const colorHandle        = note.querySelector('.color-handle');
+// Wires up all interactive events for a text note
+function setupNoteEvents(el, id) {
+    const noteId         = String(id);
+    const noteData       = notesMap.get(noteId);
+    const title          = el.querySelector('.note-title');
+    const content        = el.querySelector('.note-content');
+    const header         = el.querySelector('.note-header');
+    const delBtn         = el.querySelector('.delete-btn');
+    const colorBtn       = el.querySelector('.color-btn');
+    const paletteHolder  = el.querySelector('.color-palette-holder');
+    const colorRingEl    = el.querySelector('.color-ring-container');
+    const colorHandle    = el.querySelector('.color-handle');
 
-    colorHandle.style.transform = `translate(-50%, -50%) rotate(${randomHue - 90}deg) translate(37.5px)`;
-    const noteData = notesMap.get(noteId);
-
+    // ── Content editing ──
     content.addEventListener('focus', () => {
         content.style.whiteSpace = 'pre-wrap';
-        content.innerText = noteData.rawMarkdown.trim() === '' ? '' : noteData.rawMarkdown;
+        content.innerText = noteData.rawMarkdown || '';
     });
     content.addEventListener('blur', () => {
         noteData.rawMarkdown = content.innerText;
@@ -375,87 +431,196 @@ function createNote() {
         saveBuffer.schedule(noteId, title.innerText, content.innerText);
     });
 
+    // ── Title editing ──
     header.addEventListener('dblclick', (e) => {
         if (e.target.closest('.header-btn') || e.target.closest('.color-palette-holder')) return;
         title.contentEditable = 'true'; title.focus();
     });
-    title.addEventListener('blur', () => { title.contentEditable = 'false'; });
+    title.addEventListener('blur',  () => { title.contentEditable = 'false'; });
     title.addEventListener('input', () => {
         saveBuffer.schedule(noteId, title.innerText, noteData.rawMarkdown);
     });
 
+    // ── Color picker ──
     colorBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         paletteHolder.classList.toggle('active');
     });
     document.addEventListener('mousedown', (e) => {
-        if (!note.contains(e.target)) paletteHolder.classList.remove('active');
+        if (!el.contains(e.target)) paletteHolder.classList.remove('active');
     });
 
     let isDraggingColor = false;
-    function handleColorChange(e) {
-        const rect = colorRingContainer.getBoundingClientRect();
-        const dx = e.clientX - (rect.left + rect.width / 2);
-        const dy = e.clientY - (rect.top  + rect.height / 2);
+    function handleColorDrag(e) {
+        const rect = colorRingEl.getBoundingClientRect();
+        const dx   = e.clientX - (rect.left + rect.width  / 2);
+        const dy   = e.clientY - (rect.top  + rect.height / 2);
         const angleRaw = Math.atan2(dy, dx) * (180 / Math.PI);
-        let hue = angleRaw + 90; if (hue < 0) hue += 360;
+        const hue      = Math.round(((angleRaw + 90) % 360 + 360) % 360);
         colorHandle.style.transform = `translate(-50%, -50%) rotate(${angleRaw}deg) translate(37.5px)`;
-        const hueRound = Math.round(hue);
-        note.style.setProperty('--note-base-color', `hsl(${hueRound}, 70%, 90%)`);
-        note.style.setProperty('--note-dark-color', `hsl(${hueRound}, 70%, 80%)`);
+        el.style.setProperty('--note-base-color', `hsl(${hue}, 70%, 90%)`);
+        el.style.setProperty('--note-dark-color',  `hsl(${hue}, 70%, 80%)`);
+        return hue;
     }
-    colorRingContainer.addEventListener('mousedown', (e) => {
-        e.stopPropagation(); isDraggingColor = true; handleColorChange(e);
+    colorRingEl.addEventListener('mousedown', (e) => {
+        e.stopPropagation(); isDraggingColor = true; handleColorDrag(e);
     });
-    document.addEventListener('mousemove', (e) => { if (isDraggingColor) handleColorChange(e); });
-    document.addEventListener('mouseup', () => { isDraggingColor = false; });
-
-    delBtn.addEventListener('click', () => {
-        connections = connections.filter(c => c.fromId !== noteId && c.toId !== noteId);
-        const data = notesMap.get(noteId);
-        if (data) { data.anchorSVG.remove(); data.threadSVG.remove(); notesMap.delete(noteId); }
-        note.remove(); drawConnections();
+    document.addEventListener('mousemove', (e) => { if (isDraggingColor) handleColorDrag(e); });
+    document.addEventListener('mouseup', async (e) => {
+        if (!isDraggingColor) return;
+        isDraggingColor = false;
+        const hue = handleColorDrag(e);
+        const rgb = hslToRgb(hue, 70, 85);
+        // TODO: chapter 9 — await invoke('set_color', { id: toInvokeId(noteId), color: rgb });
     });
 
-    note.addEventListener('mousedown', () => {
-        if (!isDraggingColor) {
-            zIndexCounter += 2;
-            const newZ = zIndexCounter;
-            note.style.zIndex = newZ;
-            const data = notesMap.get(noteId);
-            data.threadSVG.style.zIndex = newZ - 1;
-            data.anchorSVG.style.zIndex = newZ;
-        }
+    // ── Delete ──
+    delBtn.addEventListener('click', () => deleteNote(noteId));
+
+    // ── Z-index on focus ──
+    el.addEventListener('mousedown', () => {
+        if (isDraggingColor) return;
+        zIndexCounter += 2;
+        el.style.zIndex = zIndexCounter;
+        noteData.threadSVG.style.zIndex = zIndexCounter - 1;
+        noteData.anchorSVG.style.zIndex = zIndexCounter;
     });
 }
 
-function makeDraggable(el) {
+// Stub for chapter 9 — deletes from DOM and local state only for now
+function deleteNote(noteId) {
+    connections = connections.filter(c => c.fromId !== noteId && c.toId !== noteId);
+    for (const [wid, wire] of wiresMap) {
+        if (String(wire.from_id) === noteId || String(wire.to_id) === noteId)
+            wiresMap.delete(wid);
+    }
+    const data = notesMap.get(noteId);
+    if (data) { data.anchorSVG.remove(); data.threadSVG.remove(); notesMap.delete(noteId); }
+    document.querySelector(`.note[data-note-id="${noteId}"]`)?.remove();
+    drawConnections();
+    // TODO: chapter 9 — await invoke('delete_element', { id: toInvokeId(noteId) })
+}
+
+// Assembles a complete note from a SlotDto or a locally-created slot object
+function createNoteShell(slot) {
+    const id     = String(slot.id);
+    zIndexCounter += 2;
+    const noteZ  = zIndexCounter;
+
+    const el = buildNoteElement(slot.id, slot.x, slot.y, slot.w, slot.h, slot.color);
+    el.style.zIndex = noteZ;
+    canvas.appendChild(el);
+
+    const { anchors, svg: anchorSVG } = createAnchorDots(id, el);
+    const { threadSVG, threadG, previewG } = createThreadSVG(noteZ);
+
+    notesMap.set(id, {
+        el, anchors, anchorSVG, threadSVG, threadG, previewG,
+        slot: { x: slot.x, y: slot.y, w: slot.w, h: slot.h },
+        rawMarkdown: '',
+        bodyLoaded: false,
+    });
+
+    makeDraggable(el, id);
+    makeResizable(el, id);
+    // kind-specific events — extend here for images etc.
+    if (!slot.kind || slot.kind === 'note') setupNoteEvents(el, id);
+}
+
+async function createNewNote() {
+    const cx = Math.round((window.innerWidth  / 2 - panX) / zoom - APP_CONSTANTS.DEFAULT_NOTE_W / 2);
+    const cy = Math.round((window.innerHeight / 2 - panY) / zoom - APP_CONSTANTS.DEFAULT_NOTE_H / 2);
+    try {
+        const id = await invoke('create_note', {
+            x: cx, y: cy,
+            w: APP_CONSTANTS.DEFAULT_NOTE_W,
+            h: APP_CONSTANTS.DEFAULT_NOTE_H,
+            title: '', body: '',
+            color: APP_CONSTANTS.DEFAULT_COLOR,
+        });
+        createNoteShell({
+            id, kind: 'note',
+            x: cx, y: cy,
+            w: APP_CONSTANTS.DEFAULT_NOTE_W,
+            h: APP_CONSTANTS.DEFAULT_NOTE_H,
+            color: APP_CONSTANTS.DEFAULT_COLOR,
+        });
+        notesMap.get(String(id)).bodyLoaded = true; // new note — nothing to load
+    } catch (e) {
+        showError('Failed to create note: ' + e);
+    }
+}
+
+// =============================================
+// DRAG & RESIZE
+// =============================================
+
+function makeDraggable(el, noteId) {
     const header = el.querySelector('.note-header');
-    let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-    header.onmousedown = (e) => {
+    let startClientX, startClientY, startWorldX, startWorldY;
+
+    header.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
-        if (e.target.closest('.header-btn') || e.target.closest('.color-palette-holder') || e.target.contentEditable === 'true') return;
+        if (e.target.closest('.header-btn') ||
+            e.target.closest('.color-palette-holder') ||
+            e.target.contentEditable === 'true') return;
         e.preventDefault();
-        pos3 = e.clientX; pos4 = e.clientY;
-        document.onmouseup = () => { document.onmouseup = null; document.onmousemove = null; };
-        document.onmousemove = (e) => {
-            e.preventDefault();
-            pos1 = pos3 - e.clientX; pos2 = pos4 - e.clientY;
-            pos3 = e.clientX; pos4 = e.clientY;
-            el.style.top  = (el.offsetTop  - pos2 / zoom) + 'px';
-            el.style.left = (el.offsetLeft - pos1 / zoom) + 'px';
-            // Keep slot in sync for viewport culling
-            const nd = notesMap.get(el.dataset.noteId);
-            if (nd) {
-                nd.slot.x = parseFloat(el.style.left);
-                nd.slot.y = parseFloat(el.style.top);
-            }
+
+        const noteData  = notesMap.get(noteId);
+        startClientX    = e.clientX;
+        startClientY    = e.clientY;
+        startWorldX     = noteData.slot.x;
+        startWorldY     = noteData.slot.y;
+
+        const onMove = (e) => {
+            const nx = Math.round(startWorldX + (e.clientX - startClientX) / zoom);
+            const ny = Math.round(startWorldY + (e.clientY - startClientY) / zoom);
+            noteData.slot.x = nx;
+            noteData.slot.y = ny;
+            el.style.left = nx + 'px';
+            el.style.top  = ny + 'px';
             updateAnchorPositions(); drawConnections();
         };
-    };
+
+        const onUp = async () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup',  onUp);
+            const { slot } = notesMap.get(noteId);
+            try {
+                await invoke('move_element', {
+                    id: toInvokeId(noteId), x: slot.x, y: slot.y, w: slot.w, h: slot.h,
+                });
+            } catch (e) { console.error('move_element failed:', e); }
+        };
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup',  onUp);
+    });
 }
 
-addBtn.addEventListener('click', createNote);
+function makeResizable(el, noteId) {
+    let resizeTimer = null;
+    const observer = new ResizeObserver(([entry]) => {
+        const { width, height } = entry.contentRect;
+        const noteData = notesMap.get(noteId);
+        if (!noteData) return;
+        noteData.slot.w = Math.round(width);
+        noteData.slot.h = Math.round(height);
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(async () => {
+            const { slot } = notesMap.get(noteId) ?? {};
+            if (!slot) return;
+            try {
+                await invoke('move_element', {
+                    id: toInvokeId(noteId), x: slot.x, y: slot.y, w: slot.w, h: slot.h,
+                });
+            } catch (e) { console.error('resize move_element failed:', e); }
+        }, 300);
+    });
+    observer.observe(el);
+}
+
+addBtn.addEventListener('click', createNewNote);
 
 // =============================================
 // VIEWPORT CULLING
@@ -525,8 +690,6 @@ window.addEventListener('resize', () => {
     updateVisibleNotes();
 });
 
-createNote();
-
 // =============================================
 // SAVE BUFFER
 // =============================================
@@ -552,11 +715,9 @@ class SaveBuffer {
         clearTimeout(entry.debounceTimer);
         clearTimeout(entry.maxTimer);
         this._pending.delete(id);
-        // Guard: skip until tauriId is assigned in integration chapter
-        const noteData = [...notesMap.values()].find(n => n.tauriId === id);
-        if (!noteData) return;
+        if (!notesMap.has(id)) return; // note already deleted
         try {
-            await invoke('update_note_content', { id, title: entry.title, body: entry.body });
+            await invoke('update_note_content', { id: toInvokeId(id), title: entry.title, body: entry.body });
         } catch (e) {
             console.error('SaveBuffer flush failed for note', id, e);
         }
@@ -569,9 +730,9 @@ const saveBuffer = new SaveBuffer();
 // PROJECT DROPDOWN
 // =============================================
 
-// -- State --
-let projects = ['Проект Альфа', 'Проект Бета', 'Проект Гамма'];
-let currentProject = projects[Math.floor(Math.random() * projects.length)];
+// -- State (populated by init_app via setupProjectDropdown) --
+let projects = [];
+let currentProject = '';
 let dropdownOpen = false;
 let addInputVisible = false;
 
@@ -923,13 +1084,44 @@ function applyDrop() {
     renderList();
 }
 
-// ===== Init =====
-projSelectorName.textContent = currentProject;
-syncWidth();
-
 // =============================================
 // PROJECT SWITCHING & WINDOW CLOSE
 // =============================================
+
+function clearCanvas() {
+    notesMap.forEach(({ el, anchorSVG, threadSVG }) => {
+        el.remove(); anchorSVG.remove(); threadSVG.remove();
+    });
+    notesMap.clear();
+    wiresMap.clear();
+    connections.length = 0;
+    saveBuffer.flushAll();
+}
+
+async function loadCurrentProject() {
+    clearCanvas();
+    try {
+        const data = await invoke('get_project_data');
+        for (const slot of data.slots) {
+            createNoteShell(slot);
+        }
+        for (const wire of data.wires) {
+            wiresMap.set(wire.id, wire);
+        }
+        drawConnections();
+        updateVisibleNotes();
+    } catch (e) {
+        showError('Failed to load project: ' + e);
+    }
+}
+
+function setupProjectDropdown(projectsList, current) {
+    projects       = projectsList;
+    currentProject = current;
+    projSelectorName.textContent = current;
+    syncWidth();
+    renderList();
+}
 
 async function switchProject(name) {
     await saveBuffer.flushAll();
@@ -939,8 +1131,18 @@ async function switchProject(name) {
     projSelectorName.textContent = name;
     syncWidth();
     renderList();
-    // TODO: await loadCurrentProject() — chapter 6
+    await loadCurrentProject();
 }
+
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        const init = await invoke('init_app');
+        setupProjectDropdown(init.projects, init.current);
+        await loadCurrentProject();
+    } catch (e) {
+        showError('Failed to initialize: ' + e);
+    }
+});
 
 if (window.__TAURI__?.window) {
     window.__TAURI__.window.getCurrentWindow().onCloseRequested(async (event) => {
