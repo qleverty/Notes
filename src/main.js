@@ -87,12 +87,9 @@ function showError(msg) {
 // THREAD SYSTEM
 // =============================================
 
-let noteIdCounter = 0; // kept for legacy wire drag — remove in chapter 8
 const notesMap = new Map(); // noteId -> { el, anchors, anchorSVG, threadSVG, threadG, previewG }
-let connections = [];
-let dragState = null; // thread drag state
+let dragState = null;
 
-// wiresMap: id (number) -> WireDto (from backend)
 const wiresMap = new Map();
 
 function getAnchorPos(el, side) {
@@ -126,25 +123,13 @@ function getNearestAnchorSide(noteEl, refPos) {
 
 function drawConnections() {
     notesMap.forEach(({ threadG }) => { threadG.innerHTML = ''; });
-
-    // wiresMap — authoritative source (populated from backend)
+    const sideNames = ['top', 'right', 'bottom', 'left'];
     wiresMap.forEach(wire => {
-        const a = notesMap.get(wire.from_id);
-        const b = notesMap.get(wire.to_id);
+        const a = notesMap.get(String(wire.from_id));
+        const b = notesMap.get(String(wire.to_id));
         if (!a || !b) return;
-        const sideNames = ['top', 'right', 'bottom', 'left'];
         const p1 = getAnchorPos(a.el, sideNames[wire.from_side]);
         const p2 = getAnchorPos(b.el, sideNames[wire.to_side]);
-        _drawWirePath(a.threadG, p1, p2, 'rgba(90,45,12,0.6)', '1.8', 'none');
-    });
-
-    // connections[] — local drag-created wires (pre-integration)
-    connections.forEach(conn => {
-        const a = notesMap.get(conn.fromId);
-        const b = notesMap.get(conn.toId);
-        if (!a || !b) return;
-        const p1 = getAnchorPos(a.el, conn.fromSide);
-        const p2 = getAnchorPos(b.el, conn.toSide);
         _drawWirePath(a.threadG, p1, p2, 'rgba(90,45,12,0.6)', '1.8', 'none');
     });
 }
@@ -159,6 +144,33 @@ function _drawWirePath(g, p1, p2, stroke, width, dasharray) {
     path.setAttribute('stroke-linecap', 'round');
     path.setAttribute('vector-effect', 'non-scaling-stroke');
     g.appendChild(path);
+}
+
+const SIDE_NUM = { top: 0, right: 1, bottom: 2, left: 3 };
+
+async function onWireCreated(fromId, fromSide, toId, toSide) {
+    try {
+        const id = await invoke('create_wire', {
+            fromId:   toInvokeId(fromId), fromSide: SIDE_NUM[fromSide],
+            toId:     toInvokeId(toId),   toSide:   SIDE_NUM[toSide],
+            color:    APP_CONSTANTS.DEFAULT_COLOR,
+        });
+        wiresMap.set(id, {
+            id,
+            from_id: toInvokeId(fromId), from_side: SIDE_NUM[fromSide],
+            to_id:   toInvokeId(toId),   to_side:   SIDE_NUM[toSide],
+            color:   APP_CONSTANTS.DEFAULT_COLOR,
+        });
+        drawConnections();
+    } catch (e) { console.error('create_wire failed:', e); }
+}
+
+async function deleteWire(wireId) {
+    try {
+        await invoke('delete_wire', { id: wireId });
+        wiresMap.delete(wireId);
+        drawConnections();
+    } catch (e) { console.error('delete_wire failed:', e); }
 }
 
 function drawPreview() {
@@ -295,24 +307,26 @@ document.addEventListener('mousemove', (e) => {
 });
 
 // Thread drag: mouseup
-document.addEventListener('mouseup', (e) => {
+document.addEventListener('mouseup', async (e) => {
     if (!dragState) return;
-    let toId = e.target.dataset?.noteId;
+    let toId   = e.target.dataset?.noteId;
     let toSide = e.target.dataset?.side;
     if (!toSide && dragState.snapToId) { toId = dragState.snapToId; toSide = dragState.snapToSide; }
+
     if (toId && toId !== dragState.fromId && toSide) {
-        const idx = connections.findIndex(c =>
-            (c.fromId === dragState.fromId && c.toId === toId) ||
-            (c.fromId === toId && c.toId === dragState.fromId)
+        // Toggle: if wire already exists between these two nodes — delete it
+        const existing = [...wiresMap.entries()].find(([, w]) =>
+            (String(w.from_id) === dragState.fromId && String(w.to_id) === toId) ||
+            (String(w.from_id) === toId && String(w.to_id) === dragState.fromId)
         );
-        if (idx >= 0) connections.splice(idx, 1);
-        else connections.push({ fromId: dragState.fromId, fromSide: dragState.fromSide, toId, toSide });
+        if (existing) await deleteWire(existing[0]);
+        else          await onWireCreated(dragState.fromId, dragState.fromSide, toId, toSide);
     }
+
     const prevFromId = dragState.fromId;
     dragState = null;
     document.body.classList.remove('thread-dragging');
-    const prevSrc = notesMap.get(prevFromId);
-    if (prevSrc) prevSrc.previewG.innerHTML = '';
+    notesMap.get(prevFromId)?.previewG && (notesMap.get(prevFromId).previewG.innerHTML = '');
     drawConnections();
 });
 
@@ -471,7 +485,9 @@ function setupNoteEvents(el, id) {
         isDraggingColor = false;
         const hue = handleColorDrag(e);
         const rgb = hslToRgb(hue, 70, 85);
-        // TODO: chapter 9 — await invoke('set_color', { id: toInvokeId(noteId), color: rgb });
+        try {
+            await invoke('set_color', { id: toInvokeId(noteId), color: rgb });
+        } catch (e) { console.error('set_color failed:', e); }
     });
 
     // ── Delete ──
@@ -487,18 +503,20 @@ function setupNoteEvents(el, id) {
     });
 }
 
-// Stub for chapter 9 — deletes from DOM and local state only for now
-function deleteNote(noteId) {
-    connections = connections.filter(c => c.fromId !== noteId && c.toId !== noteId);
+async function deleteNote(noteId) {
+    await saveBuffer._flush(noteId);
+    try {
+        await invoke('delete_element', { id: toInvokeId(noteId) });
+    } catch (e) { console.error('delete_element failed:', e); return; }
+
     for (const [wid, wire] of wiresMap) {
         if (String(wire.from_id) === noteId || String(wire.to_id) === noteId)
             wiresMap.delete(wid);
     }
     const data = notesMap.get(noteId);
-    if (data) { data.anchorSVG.remove(); data.threadSVG.remove(); notesMap.delete(noteId); }
-    document.querySelector(`.note[data-note-id="${noteId}"]`)?.remove();
+    if (data) { data.el.remove(); data.anchorSVG.remove(); data.threadSVG.remove(); }
+    notesMap.delete(noteId);
     drawConnections();
-    // TODO: chapter 9 — await invoke('delete_element', { id: toInvokeId(noteId) })
 }
 
 // Assembles a complete note from a SlotDto or a locally-created slot object
@@ -645,15 +663,12 @@ function renderNoteContent(noteData) {
 }
 
 async function loadNoteBody(id, noteData) {
-    // TODO: wire to Tauri in integration chapter
-    // Guard: skip until backend IDs are assigned
-    if (!noteData.tauriId) return;
     noteData.bodyLoaded = true;
     try {
-        const note = await invoke('read_note', { id: noteData.tauriId });
+        const note = await invoke('read_note', { id: toInvokeId(id) });
         noteData.rawMarkdown = note.body;
         const titleEl = noteData.el.querySelector('.note-title');
-        if (titleEl) titleEl.innerText = note.title;
+        if (titleEl && note.title) titleEl.innerText = note.title;
         renderNoteContent(noteData);
     } catch (e) {
         console.error('loadNoteBody failed for note', id, e);
@@ -1094,7 +1109,6 @@ function clearCanvas() {
     });
     notesMap.clear();
     wiresMap.clear();
-    connections.length = 0;
     saveBuffer.flushAll();
 }
 
@@ -1144,11 +1158,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
-if (window.__TAURI__?.window) {
-    window.__TAURI__.window.getCurrentWindow().onCloseRequested(async (event) => {
-        event.preventDefault();
-        await saveBuffer.flushAll();
-        await invoke('flush');
-        window.__TAURI__.window.getCurrentWindow().close();
-    });
-}
+// onCloseRequested removed — notes-api writes to disk on every operation,
+// so no explicit flush on close is needed. Re-add in chapter 11 if batching is introduced.
