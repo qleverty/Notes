@@ -856,9 +856,7 @@ function appendItem(name, realIdx) {
     // Delete → remove from array, re-render
     delBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        projects.splice(realIdx, 1);
-        renderList();
-        // TODO: tauri invoke('delete_project', { name })
+        onDeleteProject(name);
     });
 
     // Drag-to-sort
@@ -904,15 +902,10 @@ function startItemEdit(item, realIdx, oldName) {
         saved = true;
         const val = input.value.trim();
         if (val && val !== oldName && !projects.includes(val)) {
-            projects[realIdx] = val;
-            if (currentProject === oldName) {
-                currentProject = val;
-                projSelectorName.textContent = val;
-                syncWidth();
-            }
-            // TODO: tauri invoke('rename_project', { oldName, newName: val })
+            onRenameProject(oldName, val);
+        } else {
+            renderList();
         }
-        renderList();
     }
 
     input.addEventListener('keydown', (e) => {
@@ -945,12 +938,8 @@ projAddInput.addEventListener('input', () => {
 
 function tryAddProject() {
     const val = projAddInput.value.trim();
-    if (val && !projects.includes(val)) {
-        projects.push(val);
-        renderList();
-        // TODO: tauri invoke('create_project', { name: val })
-    }
     hideAddInput();
+    if (val && !projects.includes(val)) onAddProject(val);
 }
 
 projAddInput.addEventListener('keydown', (e) => {
@@ -1127,6 +1116,45 @@ async function loadCurrentProject() {
     } catch (e) {
         showError('Failed to load project: ' + e);
     }
+}
+
+async function onAddProject(name) {
+    try {
+        await saveBuffer.flushAll();
+        await invoke('create_project', { name });
+        projects.push(name);
+        currentProject = name;
+        projSelectorName.textContent = name;
+        syncWidth();
+        renderList();
+        await loadCurrentProject();
+        closeDropdown();
+    } catch (e) { showError(String(e)); }
+}
+
+async function onRenameProject(oldName, newName) {
+    try {
+        await invoke('rename_project', { oldName, newName });
+        const idx = projects.indexOf(oldName);
+        if (idx >= 0) projects[idx] = newName;
+        if (currentProject === oldName) {
+            currentProject = newName;
+            projSelectorName.textContent = newName;
+            syncWidth();
+        }
+        renderList();
+    } catch (e) { showError(String(e)); }
+}
+
+async function onDeleteProject(name) {
+    try {
+        const result = await invoke('delete_project', { name });
+        projects      = result.projects;
+        currentProject = result.current;
+        projSelectorName.textContent = result.current;
+        syncWidth();
+        renderList();
+    } catch (e) { showError(String(e)); }
 }
 
 function setupProjectDropdown(projectsList, current) {

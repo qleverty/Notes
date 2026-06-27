@@ -185,9 +185,15 @@ pub fn rename_project(state: State<AppState>, old_name: String, new_name: String
     Ok(())
 }
 
+#[derive(Serialize)]
+pub struct DeleteProjectDto {
+    pub projects: Vec<String>,
+    pub current:  String,
+}
+
 /// Delete a project file. Must not be the currently open project.
 #[tauri::command]
-pub fn delete_project(state: State<AppState>, name: String) -> Result<(), String> {
+pub fn delete_project(state: State<AppState>, name: String) -> Result<DeleteProjectDto, String> {
     {
         let lock = state.current.lock().unwrap();
         if lock.as_ref().map(|p| p.name == name).unwrap_or(false) {
@@ -196,7 +202,10 @@ pub fn delete_project(state: State<AppState>, name: String) -> Result<(), String
     }
     let path = projects::project_path(&name).ok_or("Cannot resolve AppData")?;
     std::fs::remove_file(&path).map_err(|e| e.to_string())?;
-    Ok(())
+
+    let current  = state.current.lock().unwrap().as_ref().map(|p| p.name.clone()).unwrap_or_default();
+    let projects = projects::list_projects().map_err(|e| e.to_string())?;
+    Ok(DeleteProjectDto { projects, current })
 }
 
 // =============================================
