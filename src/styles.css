@@ -141,6 +141,15 @@ body {
 }
 #add-btn:hover { transform: scale(1.1); background-color: #000; }
 
+/* ===== ERROR TOAST ===== */
+.error-toast {
+    position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+    background: #c00; color: white;
+    padding: 10px 20px; font: 13px 'Segoe UI', sans-serif;
+    z-index: 99999; cursor: pointer;
+    white-space: pre-wrap; max-width: 400px; text-align: center;
+}
+
 body.thread-dragging,
 body.thread-dragging * { cursor: crosshair !important; }
 
@@ -161,6 +170,11 @@ body.thread-dragging * { cursor: crosshair !important; }
     padding: 5px 10px; gap: 8px;
     background: white; cursor: pointer;
     box-sizing: border-box; width: 100%;
+    box-shadow:
+        -1px 0 0 0 rgba(0,0,0,0.14),
+         1px 0 0 0 rgba(0,0,0,0.14),
+         0 -1px 0 0 rgba(0,0,0,0.14),
+         0  1px 0 0 rgba(0,0,0,0.14);
 }
 #proj-root.is-open #proj-selector {
     box-shadow:

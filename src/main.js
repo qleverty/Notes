@@ -79,8 +79,14 @@ document.addEventListener('mouseup', (e) => {
 // =============================================
 
 function showError(msg) {
-    console.error('[Notes]', msg);
-    // TODO: toast UI в главе 11
+    const el = document.createElement('div');
+    el.className = 'error-toast';
+    el.textContent = String(msg);
+    el.addEventListener('mousedown', () => el.style.background = '#900');
+    el.addEventListener('mouseup',   () => el.style.background = '');
+    el.addEventListener('click', () => navigator.clipboard.writeText(String(msg)).catch(() => {}));
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
 }
 
 // =============================================
@@ -730,7 +736,7 @@ class SaveBuffer {
         clearTimeout(entry.debounceTimer);
         clearTimeout(entry.maxTimer);
         this._pending.delete(id);
-        if (!notesMap.has(id)) return; // note already deleted
+        if (!notesMap.has(id)) return;
         try {
             await invoke('update_note_content', { id: toInvokeId(id), title: entry.title, body: entry.body });
         } catch (e) {
@@ -1186,5 +1192,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
-// onCloseRequested removed — notes-api writes to disk on every operation,
-// so no explicit flush on close is needed. Re-add in chapter 11 if batching is introduced.
+window.addEventListener('blur', async () => {
+    await saveBuffer.flushAll();
+    await invoke('flush');
+});
+
+// onCloseRequested removed
