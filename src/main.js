@@ -4,8 +4,10 @@
 
 const invoke = window.__TAURI__?.core?.invoke ?? (() => Promise.resolve());
 
-const addBtn = document.getElementById('add-btn');
-const canvas = document.getElementById('canvas');
+const addBtn      = document.getElementById('add-btn');
+const addImageBtn = document.getElementById('add-image-btn');
+const imageInput  = document.getElementById('image-file-input');
+const canvas      = document.getElementById('canvas');
 let zIndexCounter = 10;
 let zoom = 1, panX = 0, panY = 0;
 
@@ -386,19 +388,9 @@ function createThreadSVG(noteZ) {
     return { threadSVG, threadG, previewG };
 }
 
-// Builds the div.note for a text note — extend with more builders for images etc.
-function buildNoteElement(id, x, y, w, h, color) {
-    const [hue, sat, lig] = rgbToHsl(color);
-    const el = document.createElement('div');
-    el.className = 'note';
-    el.dataset.noteId = String(id);
-    el.style.left   = x + 'px';
-    el.style.top    = y + 'px';
-    el.style.width  = w + 'px';
-    el.style.height = h + 'px';
-    el.style.setProperty('--note-base-color', `hsl(${hue}, ${sat}%, ${lig + 10}%)`);
-    el.style.setProperty('--note-dark-color',  `hsl(${hue}, ${sat}%, ${lig}%)`);
-    el.innerHTML = `
+// Shared header HTML — identical for all note types
+function noteHeaderHTML() {
+    return `
         <div class="note-header">
             <div class="note-title" contenteditable="false"></div>
             <div class="header-btn color-btn" title="Цвет">
@@ -413,14 +405,46 @@ function buildNoteElement(id, x, y, w, h, color) {
                     <div class="color-handle"></div>
                 </div>
             </div>
-        </div>
+        </div>`;
+}
+
+function applyNoteColors(el, color) {
+    const [hue, sat, lig] = rgbToHsl(color);
+    el.style.setProperty('--note-base-color', `hsl(${hue}, ${sat}%, ${lig + 10}%)`);
+    el.style.setProperty('--note-dark-color',  `hsl(${hue}, ${sat}%, ${lig}%)`);
+    el.querySelector('.color-handle').style.transform =
+        `translate(-50%, -50%) rotate(${hue - 90}deg) translate(37.5px)`;
+}
+
+// Builds the div.note for a text note
+function buildNoteElement(id, x, y, w, h, color) {
+    const el = document.createElement('div');
+    el.className = 'note';
+    el.dataset.noteId = String(id);
+    el.style.left = x + 'px'; el.style.top  = y + 'px';
+    el.style.width = w + 'px'; el.style.height = h + 'px';
+    el.innerHTML = noteHeaderHTML() + `
         <div class="note-content-wrapper">
             <div class="note-content" contenteditable="true"></div>
         </div>`;
+    applyNoteColors(el, color);
+    return el;
+}
 
-    // Position color handle to match loaded hue
-    const handle = el.querySelector('.color-handle');
-    handle.style.transform = `translate(-50%, -50%) rotate(${hue - 90}deg) translate(37.5px)`;
+// Builds the div.note for an image note
+function buildImageElement(id, x, y, w, h, color) {
+    const el = document.createElement('div');
+    el.className = 'note note--image';
+    el.dataset.noteId = String(id);
+    el.style.left = x + 'px'; el.style.top  = y + 'px';
+    el.style.width = w + 'px'; el.style.height = h + 'px';
+    el.innerHTML = noteHeaderHTML() + `
+        <div class="note-image-body">
+            <img class="note-image" src="" draggable="false" alt="">
+            <button class="image-copy-btn" title="Копировать">⎘</button>
+        </div>
+        <div class="note-image-resize-handle"></div>`;
+    applyNoteColors(el, color);
     return el;
 }
 
@@ -525,13 +549,175 @@ async function deleteNote(noteId) {
     drawConnections();
 }
 
-// Assembles a complete note from a SlotDto or a locally-created slot object
-function createNoteShell(slot) {
-    const id     = String(slot.id);
-    zIndexCounter += 2;
-    const noteZ  = zIndexCounter;
+// =============================================
+// IMAGE NOTES
+// =============================================
 
-    const el = buildNoteElement(slot.id, slot.x, slot.y, slot.w, slot.h, slot.color);
+function setupImageEvents(el, id) {
+    const noteId = String(id);
+    const noteData = notesMap.get(noteId);
+
+    // Shared header events (color, delete, z-index) — same as text notes
+    const delBtn        = el.querySelector('.delete-btn');
+    const colorBtn      = el.querySelector('.color-btn');
+    const paletteHolder = el.querySelector('.color-palette-holder');
+    const colorRingEl   = el.querySelector('.color-ring-container');
+    const colorHandle   = el.querySelector('.color-handle');
+
+    const header = el.querySelector('.note-header');
+    header.addEventListener('dblclick', (e) => {
+        if (e.target.closest('.header-btn') || e.target.closest('.color-palette-holder')) return;
+        const title = el.querySelector('.note-title');
+        title.contentEditable = 'true'; title.focus();
+    });
+    el.querySelector('.note-title').addEventListener('blur', (e) => { e.target.contentEditable = 'false'; });
+
+    colorBtn.addEventListener('click', (e) => { e.stopPropagation(); paletteHolder.classList.toggle('active'); });
+    document.addEventListener('mousedown', (e) => { if (!el.contains(e.target)) paletteHolder.classList.remove('active'); });
+
+    let isDraggingColor = false;
+    function handleColorDrag(e) {
+        const rect = colorRingEl.getBoundingClientRect();
+        const angleRaw = Math.atan2(e.clientY - (rect.top + rect.height / 2), e.clientX - (rect.left + rect.width / 2)) * (180 / Math.PI);
+        const hue = Math.round(((angleRaw + 90) % 360 + 360) % 360);
+        colorHandle.style.transform = `translate(-50%, -50%) rotate(${angleRaw}deg) translate(37.5px)`;
+        el.style.setProperty('--note-base-color', `hsl(${hue}, 70%, 90%)`);
+        el.style.setProperty('--note-dark-color',  `hsl(${hue}, 70%, 80%)`);
+        return hue;
+    }
+    colorRingEl.addEventListener('mousedown', (e) => { e.stopPropagation(); isDraggingColor = true; handleColorDrag(e); });
+    document.addEventListener('mousemove', (e) => { if (isDraggingColor) handleColorDrag(e); });
+    document.addEventListener('mouseup', async (e) => {
+        if (!isDraggingColor) return;
+        isDraggingColor = false;
+        const hue = handleColorDrag(e);
+        const rgb = hslToRgb(hue, 70, 85);
+        try { await invoke('set_color', { id: toInvokeId(noteId), color: rgb }); }
+        catch (e) { console.error('set_color failed:', e); }
+    });
+
+    delBtn.addEventListener('click', () => deleteNote(noteId));
+
+    el.addEventListener('mousedown', () => {
+        if (isDraggingColor) return;
+        zIndexCounter += 2;
+        el.style.zIndex = zIndexCounter;
+        noteData.threadSVG.style.zIndex = zIndexCounter - 1;
+        noteData.anchorSVG.style.zIndex = zIndexCounter;
+    });
+
+    // Copy button
+    const copyBtn = el.querySelector('.image-copy-btn');
+    copyBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const img = el.querySelector('.note-image');
+        if (!img.src || img.src === window.location.href) return;
+        try {
+            const res  = await fetch(img.src);
+            const blob = await res.blob();
+            await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+        } catch (err) { console.error('Copy image failed:', err); }
+    });
+}
+
+function makeAspectResizable(el, noteId, aspectRatio) {
+    const handle = el.querySelector('.note-image-resize-handle');
+    let startX, startY, startW, startH;
+
+    handle.addEventListener('mousedown', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        startX = e.clientX; startY = e.clientY;
+        startW = el.offsetWidth; startH = el.offsetHeight;
+
+        const onMove = (e) => {
+            const diag  = ((e.clientX - startX) + (e.clientY - startY)) / 2 / zoom;
+            const newW  = Math.max(100, Math.round(startW + diag));
+            const newH  = Math.max(60,  Math.round(30 + newW / aspectRatio));
+            el.style.width  = newW + 'px';
+            el.style.height = newH + 'px';
+            const nd = notesMap.get(noteId);
+            if (nd) { nd.slot.w = newW; nd.slot.h = newH; }
+            updateAnchorPositions();
+        };
+
+        const onUp = async () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup',  onUp);
+            const { slot } = notesMap.get(noteId) ?? {};
+            if (!slot) return;
+            try { await invoke('move_element', { id: toInvokeId(noteId), x: slot.x, y: slot.y, w: slot.w, h: slot.h }); }
+            catch (e) { console.error('aspect resize failed:', e); }
+        };
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup',  onUp);
+    });
+}
+
+async function loadImageBody(id, noteData) {
+    noteData.bodyLoaded = true;
+    try {
+        const img  = await invoke('read_image', { id: toInvokeId(id) });
+        const src  = `data:${img.mime};base64,${img.data_b64}`;
+        noteData.el.querySelector('.note-image').src = src;
+    } catch (e) {
+        console.error('loadImageBody failed', id, e);
+        noteData.bodyLoaded = false;
+    }
+}
+
+async function createImageNote(file) {
+    const dataB64 = await new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload  = () => res(reader.result.split(',')[1]);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+    });
+
+    const { naturalWidth: imgW, naturalHeight: imgH } = await new Promise((res, rej) => {
+        const img = new Image();
+        img.onload  = () => res(img);
+        img.onerror = rej;
+        img.src = URL.createObjectURL(file);
+    });
+
+    const TARGET      = APP_CONSTANTS.DEFAULT_NOTE_W;
+    const scale       = TARGET / Math.min(imgW, imgH);
+    const noteW       = Math.round(imgW * scale);
+    const noteH       = Math.round(imgH * scale) + 30;
+    const aspectRatio = imgW / imgH;
+
+    const cx = Math.round((window.innerWidth  / 2 - panX) / zoom - noteW / 2);
+    const cy = Math.round((window.innerHeight / 2 - panY) / zoom - noteH / 2);
+    const mime = file.type || 'image/png';
+
+    try {
+        const id = await invoke('create_image', {
+            x: cx, y: cy, w: noteW, h: noteH,
+            color: APP_CONSTANTS.DEFAULT_COLOR,
+            mime, dataB64,
+        });
+        createNoteShell(
+            { id, kind: 'image', x: cx, y: cy, w: noteW, h: noteH, color: APP_CONSTANTS.DEFAULT_COLOR },
+            { dataB64, mime, aspectRatio },
+        );
+    } catch (e) { showError('Failed to create image: ' + e); }
+}
+
+// =============================================
+// SHELL ASSEMBLER
+// =============================================
+
+// imageData = { dataB64, mime, aspectRatio } — only passed for newly created images
+function createNoteShell(slot, imageData = null) {
+    const id    = String(slot.id);
+    const kind  = slot.kind || 'note';
+    zIndexCounter += 2;
+    const noteZ = zIndexCounter;
+
+    const el = kind === 'image'
+        ? buildImageElement(slot.id, slot.x, slot.y, slot.w, slot.h, slot.color)
+        : buildNoteElement (slot.id, slot.x, slot.y, slot.w, slot.h, slot.color);
     el.style.zIndex = noteZ;
     canvas.appendChild(el);
 
@@ -540,15 +726,27 @@ function createNoteShell(slot) {
 
     notesMap.set(id, {
         el, anchors, anchorSVG, threadSVG, threadG, previewG,
-        slot: { x: slot.x, y: slot.y, w: slot.w, h: slot.h },
+        kind,
+        slot:        { x: slot.x, y: slot.y, w: slot.w, h: slot.h },
         rawMarkdown: '',
-        bodyLoaded: false,
+        bodyLoaded:  false,
     });
 
     makeDraggable(el, id);
-    makeResizable(el, id);
-    // kind-specific events — extend here for images etc.
-    if (!slot.kind || slot.kind === 'note') setupNoteEvents(el, id);
+
+    if (kind === 'image') {
+        const ratio = imageData?.aspectRatio ?? (slot.w / (slot.h - 30));
+        makeAspectResizable(el, id, ratio);
+        setupImageEvents(el, id);
+        if (imageData) {
+            // Freshly created — set src directly, no need to load from backend
+            el.querySelector('.note-image').src = `data:${imageData.mime};base64,${imageData.dataB64}`;
+            notesMap.get(id).bodyLoaded = true;
+        }
+    } else {
+        makeResizable(el, id);
+        setupNoteEvents(el, id);
+    }
 }
 
 async function createNewNote() {
@@ -562,17 +760,9 @@ async function createNewNote() {
             title: '', body: '',
             color: APP_CONSTANTS.DEFAULT_COLOR,
         });
-        createNoteShell({
-            id, kind: 'note',
-            x: cx, y: cy,
-            w: APP_CONSTANTS.DEFAULT_NOTE_W,
-            h: APP_CONSTANTS.DEFAULT_NOTE_H,
-            color: APP_CONSTANTS.DEFAULT_COLOR,
-        });
-        notesMap.get(String(id)).bodyLoaded = true; // new note — nothing to load
-    } catch (e) {
-        showError('Failed to create note: ' + e);
-    }
+        createNoteShell({ id, kind: 'note', x: cx, y: cy, w: APP_CONSTANTS.DEFAULT_NOTE_W, h: APP_CONSTANTS.DEFAULT_NOTE_H, color: APP_CONSTANTS.DEFAULT_COLOR });
+        notesMap.get(String(id)).bodyLoaded = true;
+    } catch (e) { showError('Failed to create note: ' + e); }
 }
 
 // =============================================
@@ -645,6 +835,12 @@ function makeResizable(el, noteId) {
 }
 
 addBtn.addEventListener('click', createNewNote);
+addImageBtn.addEventListener('click', () => imageInput.click());
+imageInput.addEventListener('change', () => {
+    const file = imageInput.files[0];
+    imageInput.value = '';
+    if (file) createImageNote(file);
+});
 
 // =============================================
 // VIEWPORT CULLING
@@ -698,7 +894,8 @@ function updateVisibleNotes() {
         noteData.el.style.display = visible ? '' : 'none';
 
         if (visible && zoom >= CULL.NOTE_BODY_MIN_ZOOM && !noteData.bodyLoaded) {
-            loadNoteBody(id, noteData);
+            if (noteData.kind === 'image') loadImageBody(id, noteData);
+            else                           loadNoteBody(id, noteData);
         }
         if (!visible && noteData.bodyLoaded) {
             unloadNoteBody(noteData);

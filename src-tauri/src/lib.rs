@@ -25,6 +25,8 @@ pub fn run() {
             commands::create_wire,
             commands::delete_wire,
             commands::flush,
+            commands::create_image,
+            commands::read_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

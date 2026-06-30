@@ -141,6 +141,67 @@ body {
 }
 #add-btn:hover { transform: scale(1.1); background-color: #000; }
 
+#add-image-btn {
+    position: fixed; bottom: 100px; left: 30px;
+    width: 60px; height: 60px;
+    background-color: #333; color: white;
+    border: none; cursor: pointer;
+    z-index: 9999; transition: transform 0.2s; border-radius: 0;
+    display: flex; align-items: center; justify-content: center;
+}
+#add-image-btn:hover { transform: scale(1.1); background-color: #000; }
+#add-image-btn::before {
+    content: "";
+    width: 22px; height: 18px;
+    border: 2px solid white; border-radius: 1px;
+    box-sizing: border-box; position: relative;
+}
+#add-image-btn::after {
+    content: "";
+    position: absolute;
+    width: 6px; height: 6px;
+    background: white; border-radius: 50%;
+    top: 16px; left: 36px;
+}
+
+/* ===== IMAGE NOTES ===== */
+.note--image { resize: none; }
+
+.note-image-body {
+    flex-grow: 1; position: relative; overflow: hidden;
+    background: #eee;
+}
+
+.note-image {
+    width: 100%; height: 100%;
+    object-fit: cover; display: block;
+    user-select: none; -webkit-user-drag: none;
+}
+
+.image-copy-btn {
+    position: absolute; bottom: 0; right: 0;
+    width: 30px; height: 30px;
+    background: rgba(0,0,0,0.55); color: white;
+    border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; opacity: 0;
+    transition: opacity 0.15s, background 0.1s;
+}
+.note-image-body:hover .image-copy-btn { opacity: 1; }
+.image-copy-btn:active { background: rgba(0,0,0,0.85); }
+
+.note-image-resize-handle {
+    position: absolute; bottom: 0; right: 0;
+    width: 14px; height: 14px; cursor: nwse-resize; z-index: 20;
+}
+.note-image-resize-handle::after {
+    content: "";
+    position: absolute; bottom: 3px; right: 3px;
+    width: 6px; height: 6px;
+    border-right: 2px solid rgba(0,0,0,0.3);
+    border-bottom: 2px solid rgba(0,0,0,0.3);
+}
+
 /* ===== ERROR TOAST ===== */
 .error-toast {
     position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
