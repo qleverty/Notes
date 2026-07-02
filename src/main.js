@@ -100,13 +100,23 @@ let dragState = null;
 
 const wiresMap = new Map();
 
-function getAnchorPos(el, side) {
-    const r = el.getBoundingClientRect();
+function getAnchorPos(noteId, side) {
+    const nd = notesMap.get(noteId);
+    if (nd.el.style.display !== 'none') {
+        const r = nd.el.getBoundingClientRect();
+        switch (side) {
+            case 'top':    return { x: r.left + r.width / 2, y: r.top };
+            case 'bottom': return { x: r.left + r.width / 2, y: r.bottom };
+            case 'left':   return { x: r.left,  y: r.top + r.height / 2 };
+            case 'right':  return { x: r.right, y: r.top + r.height / 2 };
+        }
+    }
+    const { x, y, w, h } = nd.slot;
     switch (side) {
-        case 'top':    return { x: r.left + r.width / 2, y: r.top };
-        case 'bottom': return { x: r.left + r.width / 2, y: r.bottom };
-        case 'left':   return { x: r.left,  y: r.top + r.height / 2 };
-        case 'right':  return { x: r.right, y: r.top + r.height / 2 };
+        case 'top':    return { x: (x + w / 2) * zoom + panX, y: y * zoom + panY };
+        case 'bottom': return { x: (x + w / 2) * zoom + panX, y: (y + h) * zoom + panY };
+        case 'left':   return { x: x * zoom + panX,            y: (y + h / 2) * zoom + panY };
+        case 'right':  return { x: (x + w) * zoom + panX,      y: (y + h / 2) * zoom + panY };
     }
 }
 
@@ -136,8 +146,8 @@ function drawConnections() {
         const a = notesMap.get(String(wire.from_id));
         const b = notesMap.get(String(wire.to_id));
         if (!a || !b) return;
-        const p1 = getAnchorPos(a.el, sideNames[wire.from_side]);
-        const p2 = getAnchorPos(b.el, sideNames[wire.to_side]);
+        const p1 = getAnchorPos(String(wire.from_id), sideNames[wire.from_side]);
+        const p2 = getAnchorPos(String(wire.to_id), sideNames[wire.to_side]);
         _drawWirePath(a.threadG, p1, p2, 'rgba(90,45,12,0.6)', '1.8', 'none');
     });
 }
@@ -186,11 +196,10 @@ function drawPreview() {
     if (!dragState) return;
     const src = notesMap.get(dragState.fromId);
     if (!src) return;
-    const p1s = getAnchorPos(src.el, dragState.fromSide);
+    const p1s = getAnchorPos(dragState.fromId, dragState.fromSide);
     let p2s = { x: dragState.curX, y: dragState.curY };
     if (dragState.snapToId) {
-        const sn = notesMap.get(dragState.snapToId);
-        if (sn) p2s = getAnchorPos(sn.el, dragState.snapToSide);
+        p2s = getAnchorPos(dragState.snapToId, dragState.snapToSide);
     }
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', screenToCanvas2(p1s, p2s));
@@ -209,10 +218,10 @@ function getNoteColor(noteEl) {
 }
 
 function updateAnchorPositions() {
-    notesMap.forEach(({ el, anchors }) => {
+    notesMap.forEach(({ el, anchors }, id) => {
         const color = getNoteColor(el);
         ['top','bottom','left','right'].forEach(side => {
-            const pos = getAnchorPos(el, side);
+            const pos = getAnchorPos(id, side);
             const { hit, vis } = anchors[side];
             hit.setAttribute('cx', pos.x); hit.setAttribute('cy', pos.y);
             vis.setAttribute('cx', pos.x); vis.setAttribute('cy', pos.y);
@@ -302,7 +311,7 @@ document.addEventListener('mousemove', (e) => {
         notesMap.forEach(({ el }, id) => {
             if (id === dragState.fromId) return;
             ['top','bottom','left','right'].forEach(side => {
-                const p = getAnchorPos(el, side);
+                const p = getAnchorPos(id, side);
                 const d = Math.hypot(e.clientX - p.x, e.clientY - p.y);
                 if (d < bestDist) { bestDist = d; bestId = id; bestSide = side; }
             });
