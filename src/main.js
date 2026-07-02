@@ -816,6 +816,7 @@ function makeResizable(el, noteId) {
     let resizeTimer = null;
     const observer = new ResizeObserver(([entry]) => {
         const { width, height } = entry.contentRect;
+        if (width <= 0 || height <= 0) return;
         const noteData = notesMap.get(noteId);
         if (!noteData) return;
         noteData.slot.w = Math.round(width);
