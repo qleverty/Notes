@@ -580,7 +580,7 @@ function setupImageEvents(el, id) {
     });
     el.querySelector('.note-title').addEventListener('blur', async (e) => {
         e.target.contentEditable = 'false';
-        try { await invoke('update_image_title', { id: toInvokeId(noteId), title: e.target.innerText }); }
+        try { await invoke('update_image_title', { id: toInvokeId(id), title: e.target.innerText }); }
         catch (err) { console.error('update_image_title failed', err); }
     });
 
