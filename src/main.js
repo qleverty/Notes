@@ -578,7 +578,11 @@ function setupImageEvents(el, id) {
         const title = el.querySelector('.note-title');
         title.contentEditable = 'true'; title.focus();
     });
-    el.querySelector('.note-title').addEventListener('blur', (e) => { e.target.contentEditable = 'false'; });
+    el.querySelector('.note-title').addEventListener('blur', async (e) => {
+        e.target.contentEditable = 'false';
+        try { await invoke('update_image_title', { id: toInvokeId(noteId), title: e.target.innerText }); }
+        catch (err) { console.error('update_image_title failed', err); }
+    });
 
     colorBtn.addEventListener('click', (e) => { e.stopPropagation(); paletteHolder.classList.toggle('active'); });
     document.addEventListener('mousedown', (e) => { if (!el.contains(e.target)) paletteHolder.classList.remove('active'); });
@@ -668,6 +672,7 @@ async function loadImageBody(id, noteData) {
         const img  = await invoke('read_image', { id: toInvokeId(id) });
         const src  = `data:${img.mime};base64,${img.data_b64}`;
         noteData.el.querySelector('.note-image').src = src;
+        if (img.title) noteData.el.querySelector('.note-title').innerText = img.title;
     } catch (e) {
         console.error('loadImageBody failed', id, e);
         noteData.bodyLoaded = false;
@@ -720,7 +725,7 @@ async function createImageNote(file) {
         const color = await extractImageColor(mime, dataB64);
         const id = await invoke('create_image', {
             x: cx, y: cy, w: noteW, h: noteH,
-            color, mime, dataB64,
+            color, mime, title: '', dataB64,
         });
         createNoteShell(
             { id, kind: 'image', x: cx, y: cy, w: noteW, h: noteH, color },

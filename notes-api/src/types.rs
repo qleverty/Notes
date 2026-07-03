@@ -45,7 +45,7 @@ pub struct WireInfo {
 pub struct Note  { pub id: u64, pub title: String, pub body: String }
 
 #[derive(Debug, Clone)]
-pub struct Image { pub id: u64, pub mime: String, pub data: Vec<u8> }
+pub struct Image { pub id: u64, pub mime: String, pub data: Vec<u8>, pub title: String }
 
 #[derive(Debug)]
 pub enum NotsError {
@@ -57,6 +57,7 @@ pub enum NotsError {
     InvalidSide(u8),
     Utf8(std::string::FromUtf8Error),
     MapFull,
+    TitleTooLong,
 }
 
 impl std::fmt::Display for NotsError {
@@ -70,6 +71,7 @@ impl std::fmt::Display for NotsError {
             Self::InvalidSide(s)     => write!(f, "invalid side {s}"),
             Self::Utf8(e)            => write!(f, "UTF-8: {e}"),
             Self::MapFull            => write!(f, "map region full"),
+            Self::TitleTooLong       => write!(f, "title exceeds 256 bytes"),
         }
     }
 }

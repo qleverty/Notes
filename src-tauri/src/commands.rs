@@ -313,6 +313,7 @@ pub fn delete_wire(state: State<AppState>, id: u64) -> Result<(), String> {
 pub struct ImageDto {
     pub id:       u64,
     pub mime:     String,
+    pub title:    String,
     pub data_b64: String,
 }
 
@@ -322,12 +323,13 @@ pub fn create_image(
     x: i64, y: i64, w: i64, h: i64,
     color: [u8; 3],
     mime: String,
+    title: String,
     data_b64: String,
 ) -> Result<u64, String> {
     let data = STANDARD.decode(&data_b64).map_err(|e| e.to_string())?;
     let mut lock = state.current.lock().unwrap();
     let proj = lock.as_mut().ok_or("No project open")?;
-    proj.file.create_image(x, y, w, h, &mime, &data, color)
+    proj.file.create_image(x, y, w, h, &mime, &data, &title, color)
         .map_err(|e| e.to_string())
 }
 
@@ -336,7 +338,14 @@ pub fn read_image(state: State<AppState>, id: u64) -> Result<ImageDto, String> {
     let mut lock = state.current.lock().unwrap();
     let proj = lock.as_mut().ok_or("No project open")?;
     let img = proj.file.read_image(id).map_err(|e| e.to_string())?;
-    Ok(ImageDto { id: img.id, mime: img.mime, data_b64: STANDARD.encode(&img.data) })
+    Ok(ImageDto { id: img.id, mime: img.mime, title: img.title, data_b64: STANDARD.encode(&img.data) })
+}
+
+#[tauri::command]
+pub fn update_image_title(state: State<AppState>, id: u64, title: String) -> Result<(), String> {
+    let mut lock = state.current.lock().unwrap();
+    let proj = lock.as_mut().ok_or("No project open")?;
+    proj.file.update_image_title(id, &title).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

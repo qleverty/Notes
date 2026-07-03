@@ -13,6 +13,8 @@ use std::path::Path;
 
 use header::Header;
 use map::{InternalSlot, FLAG_DELETED};
+
+const IMAGE_TITLE_MAX: usize = 256;
 use data::FreeBlock;
 use types::*;
 
@@ -93,6 +95,7 @@ impl NotesFile {
 
     pub fn read_image(&mut self, id: u64) -> Result<Image> {
         let base = self.data_abs(id)?;
+        let block_size = io::read_i64_le(&mut self.file, base)? as u64;
         let mut ml = [0u8; 1];
         io::read_at(&mut self.file, base + 8, &mut ml)?;
         let mlen = ml[0] as u64;
@@ -105,7 +108,20 @@ impl NotesFile {
         let dlen = u64::from_le_bytes(buf8);
         let mut dbuf = vec![0u8; dlen as usize];
         io::read_at(&mut self.file, dbase + 8, &mut dbuf)?;
-        Ok(Image { id, mime, data: dbuf })
+        // Title section: present if block has room for at least 2 bytes after image data
+        let title_rel = 1 + mlen + 8 + dlen; // relative to block payload start (after 8-byte size header)
+        let title = if title_rel + 2 <= block_size {
+            let tbase = base + 8 + title_rel;
+            let mut tl = [0u8; 2];
+            io::read_at(&mut self.file, tbase, &mut tl)?;
+            let tlen = u16::from_le_bytes(tl) as u64;
+            let mut tbuf = vec![0u8; tlen as usize];
+            if tlen > 0 { io::read_at(&mut self.file, tbase + 2, &mut tbuf)?; }
+            String::from_utf8(tbuf)?
+        } else {
+            String::new()
+        };
+        Ok(Image { id, mime, data: dbuf, title })
     }
 
     pub fn create_note(&mut self, x: i64, y: i64, w: i64, h: i64, title: &str, body: &str, color: [u8; 3]) -> Result<u64> {
@@ -121,15 +137,20 @@ impl NotesFile {
         Ok(id)
     }
 
-    pub fn create_image(&mut self, x: i64, y: i64, w: i64, h: i64, mime: &str, data: &[u8], color: [u8; 3]) -> Result<u64> {
+    pub fn create_image(&mut self, x: i64, y: i64, w: i64, h: i64, mime: &str, data: &[u8], title: &str, color: [u8; 3]) -> Result<u64> {
+        let tb = title.as_bytes();
+        if tb.len() > IMAGE_TITLE_MAX { return Err(NotsError::TitleTooLong); }
         let mb = mime.as_bytes();
         let total = 8 + 1 + mb.len() as u64 + 8 + data.len() as u64;
-        let (doff, _) = data::alloc(&mut self.file, self.magic_pos, &mut self.header, &mut self.free_blocks, total, total)?;
+        let (doff, _) = data::alloc(&mut self.file, self.magic_pos, &mut self.header, &mut self.free_blocks,
+            total, total + IMAGE_TITLE_MAX as u64)?;
         let mut p = self.magic_pos + self.header.data_offset + doff + 8;
         io::write_at(&mut self.file, p, &[mb.len() as u8])?; p += 1;
         io::write_at(&mut self.file, p, mb)?;                  p += mb.len() as u64;
         io::write_at(&mut self.file, p, &(data.len() as u64).to_le_bytes())?; p += 8;
-        io::write_at(&mut self.file, p, data)?;
+        io::write_at(&mut self.file, p, data)?; p += data.len() as u64;
+        io::write_at(&mut self.file, p, &(tb.len() as u16).to_le_bytes())?; p += 2;
+        if !tb.is_empty() { io::write_at(&mut self.file, p, tb)?; }
         let id = self.next_id();
         self.push_slot(InternalSlot::Element { kind: ElementKind::Image, flags: 0, id, data_offset: doff, x, y, w, h, color })?;
         self.header.write(&mut self.file, self.magic_pos)?;
@@ -163,6 +184,27 @@ impl NotesFile {
             map::write_slot(&mut self.file, self.magic_pos, &self.header, idx, &self.slots[idx])?;
             self.header.write(&mut self.file, self.magic_pos)?;
         }
+        Ok(())
+    }
+
+    pub fn update_image_title(&mut self, id: u64, title: &str) -> Result<()> {
+        let tb = title.as_bytes();
+        if tb.len() > IMAGE_TITLE_MAX { return Err(NotsError::TitleTooLong); }
+        let abs = self.data_abs(id)?;
+        let block_size = io::read_i64_le(&mut self.file, abs)? as u64;
+        // Read mime and image lengths to locate title section
+        let mut ml = [0u8; 1];
+        io::read_at(&mut self.file, abs + 8, &mut ml)?;
+        let mlen = ml[0] as u64;
+        let mut buf8 = [0u8; 8];
+        io::read_at(&mut self.file, abs + 9 + mlen, &mut buf8)?;
+        let dlen = u64::from_le_bytes(buf8);
+        let title_rel = 1 + mlen + 8 + dlen; // bytes into payload
+        let available = block_size.saturating_sub(8 + title_rel);
+        if available < 2 { return Err(NotsError::MapFull); }
+        let tbase = abs + 8 + title_rel;
+        io::write_at(&mut self.file, tbase, &(tb.len() as u16).to_le_bytes())?;
+        if !tb.is_empty() { io::write_at(&mut self.file, tbase + 2, tb)?; }
         Ok(())
     }
 
