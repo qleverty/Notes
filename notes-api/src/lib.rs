@@ -110,7 +110,7 @@ impl NotesFile {
         io::read_at(&mut self.file, dbase + 8, &mut dbuf)?;
         // Title section: present if block has room for at least 2 bytes after image data
         let title_rel = 1 + mlen + 8 + dlen; // relative to block payload start (after 8-byte size header)
-        let title = if title_rel + 2 <= block_size {
+        let title = if 8 + title_rel + 2 <= block_size {
             let tbase = base + 8 + title_rel;
             let mut tl = [0u8; 2];
             io::read_at(&mut self.file, tbase, &mut tl)?;
