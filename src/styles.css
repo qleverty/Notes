@@ -96,7 +96,6 @@ body {
 }
 .ring-line { position: absolute; border-radius: 50%; border: 1px solid white; pointer-events: none; z-index: 2; }
 .line-outer { width: 89px; height: 89px; }
-.line-inner { width: 61px; height: 61px; }
 .color-handle {
     position: absolute; width: 16px; height: 16px;
     background: white; border: 1px solid rgba(0,0,0,0.2); border-radius: 50%;

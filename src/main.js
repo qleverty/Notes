@@ -409,7 +409,6 @@ function noteHeaderHTML() {
             <div class="color-palette-holder">
                 <div class="color-ring-container">
                     <div class="ring-line line-outer"></div>
-                    <div class="ring-line line-inner"></div>
                     <div class="color-ring"></div>
                     <div class="color-handle"></div>
                 </div>
@@ -675,6 +674,23 @@ async function loadImageBody(id, noteData) {
     }
 }
 
+function extractImageColor(mime, dataB64) {
+    return new Promise(res => {
+        const img = new Image();
+        img.onload = () => {
+            const c = document.createElement('canvas');
+            c.width = c.height = 1;
+            c.getContext('2d').drawImage(img, 0, 0, 1, 1);
+            const [r, g, b] = c.getContext('2d').getImageData(0, 0, 1, 1).data;
+            c.width = 0;
+            const [h] = rgbToHsl([r, g, b]);
+            res(hslToRgb(h, 70, 85));
+        };
+        img.onerror = () => res(APP_CONSTANTS.DEFAULT_COLOR);
+        img.src = `data:${mime};base64,${dataB64}`;
+    });
+}
+
 async function createImageNote(file) {
     const dataB64 = await new Promise((res, rej) => {
         const reader = new FileReader();
@@ -701,13 +717,13 @@ async function createImageNote(file) {
     const mime = file.type || 'image/png';
 
     try {
+        const color = await extractImageColor(mime, dataB64);
         const id = await invoke('create_image', {
             x: cx, y: cy, w: noteW, h: noteH,
-            color: APP_CONSTANTS.DEFAULT_COLOR,
-            mime, dataB64,
+            color, mime, dataB64,
         });
         createNoteShell(
-            { id, kind: 'image', x: cx, y: cy, w: noteW, h: noteH, color: APP_CONSTANTS.DEFAULT_COLOR },
+            { id, kind: 'image', x: cx, y: cy, w: noteW, h: noteH, color },
             { dataB64, mime, aspectRatio },
         );
     } catch (e) { showError('Failed to create image: ' + e); }
