@@ -578,6 +578,11 @@ function setupImageEvents(el, id) {
         const title = el.querySelector('.note-title');
         title.contentEditable = 'true'; title.focus();
     });
+    const titleEncoder = new TextEncoder();
+    el.querySelector('.note-title').addEventListener('beforeinput', (e) => {
+        const incoming = e.data ?? e.dataTransfer?.getData('text') ?? '';
+        if (titleEncoder.encode(e.target.innerText + incoming).length >= 255) e.preventDefault();
+    });
     el.querySelector('.note-title').addEventListener('blur', async (e) => {
         e.target.contentEditable = 'false';
         const titleText = e.target.innerText;

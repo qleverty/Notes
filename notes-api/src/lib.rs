@@ -139,8 +139,7 @@ impl NotesFile {
 
     pub fn create_image(&mut self, x: i64, y: i64, w: i64, h: i64, mime: &str, data: &[u8], title: &str, color: [u8; 3]) -> Result<u64> {
         let tb = title.as_bytes();
-        if tb.len() > IMAGE_TITLE_MAX { return Err(NotsError::TitleTooLong); }
-        let mb = mime.as_bytes();
+        if tb.len() > IMAGE_TITLE_MAX - 2 { return Err(NotsError::TitleTooLong); }
         let total = 8 + 1 + mb.len() as u64 + 8 + data.len() as u64;
         let (doff, _) = data::alloc(&mut self.file, self.magic_pos, &mut self.header, &mut self.free_blocks,
             total, total + IMAGE_TITLE_MAX as u64)?;
@@ -189,8 +188,7 @@ impl NotesFile {
 
     pub fn update_image_title(&mut self, id: u64, title: &str) -> Result<()> {
         let tb = title.as_bytes();
-        if tb.len() > IMAGE_TITLE_MAX { return Err(NotsError::TitleTooLong); }
-        let abs = self.data_abs(id)?;
+        if tb.len() > IMAGE_TITLE_MAX - 2 { return Err(NotsError::TitleTooLong); }
         let block_size = io::read_i64_le(&mut self.file, abs)? as u64;
         // Read mime and image lengths to locate title section
         let mut ml = [0u8; 1];
