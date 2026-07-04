@@ -580,8 +580,14 @@ function setupImageEvents(el, id) {
     });
     el.querySelector('.note-title').addEventListener('blur', async (e) => {
         e.target.contentEditable = 'false';
-        try { await invoke('update_image_title', { id: toInvokeId(id), title: e.target.innerText }); }
-        catch (err) { console.error('update_image_title failed', err); }
+        const titleText = e.target.innerText;
+        const invokeId  = toInvokeId(id);
+        console.log('[title] blur fired, id=', invokeId, 'title=', JSON.stringify(titleText));
+        try {
+            await invoke('update_image_title', { id: invokeId, title: titleText });
+            console.log('[title] update_image_title OK');
+        }
+        catch (err) { console.error('[title] update_image_title FAILED', err); }
     });
 
     colorBtn.addEventListener('click', (e) => { e.stopPropagation(); paletteHolder.classList.toggle('active'); });
@@ -670,6 +676,7 @@ async function loadImageBody(id, noteData) {
     noteData.bodyLoaded = true;
     try {
         const img  = await invoke('read_image', { id: toInvokeId(id) });
+        console.log('[title] read_image id=', id, 'title=', JSON.stringify(img.title));
         const src  = `data:${img.mime};base64,${img.data_b64}`;
         noteData.el.querySelector('.note-image').src = src;
         if (img.title) noteData.el.querySelector('.note-title').innerText = img.title;
