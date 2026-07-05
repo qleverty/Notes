@@ -46,10 +46,10 @@ body {
 .note-title {
     font-size: 15px; font-weight: normal;
     color: rgba(0,0,0,0.7);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; overflow: hidden; text-overflow: clip;
     outline: none; width: calc(100% - 65px); user-select: none;
 }
-.note-title[contenteditable="true"] { user-select: text; cursor: text; }
+.note-title[contenteditable="true"] { user-select: text; cursor: text; overflow: visible; }
 .note-title:empty::before { content: "Заголовок..."; color: rgba(0,0,0,0.3); }
 
 .header-btn {
