@@ -580,8 +580,15 @@ function setupImageEvents(el, id) {
     });
     const titleEncoder = new TextEncoder();
     el.querySelector('.note-title').addEventListener('beforeinput', (e) => {
-        const incoming = e.data ?? e.dataTransfer?.getData('text') ?? '';
-        if (titleEncoder.encode(e.target.innerText + incoming).length >= 255) e.preventDefault();
+        if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') {
+            e.preventDefault();
+            return;
+        }
+        const incoming = e.inputType === 'insertFromPaste'
+            ? (e.dataTransfer?.getData('text/plain') ?? '')
+            : (e.data ?? '');
+        const current = e.target.innerText.trimEnd();
+        if (titleEncoder.encode(current + incoming).length >= 255) e.preventDefault();
     });
     el.querySelector('.note-title').addEventListener('blur', async (e) => {
         e.target.contentEditable = 'false';
