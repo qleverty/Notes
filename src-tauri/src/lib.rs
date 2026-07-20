@@ -27,6 +27,7 @@ pub fn run() {
             commands::flush,
             commands::create_image,
             commands::read_image,
+            commands::read_image_meta,
             commands::update_image_title,
         ])
         .run(tauri::generate_context!())

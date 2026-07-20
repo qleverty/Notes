@@ -4,7 +4,7 @@ mod header;
 mod map;
 mod data;
 
-pub use types::{ElementKind, Side, SlotInfo, WireInfo, Note, Image, NotsError, Result, DEFAULT_COLOR};
+pub use types::{ElementKind, Side, SlotInfo, WireInfo, Note, Image, ImageMeta, NotsError, Result, DEFAULT_COLOR};
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -91,6 +91,31 @@ impl NotesFile {
         let mut bbuf = vec![0u8; blen as usize];
         io::read_at(&mut self.file, body_base + 8, &mut bbuf)?;
         Ok(Note { id, title, body: String::from_utf8(bbuf)? })
+    }
+
+    pub fn read_image_meta(&mut self, id: u64) -> Result<ImageMeta> {
+        let base = self.data_abs(id)?;
+        let block_size = io::read_i64_le(&mut self.file, base)? as u64;
+        let mut ml = [0u8; 1];
+        io::read_at(&mut self.file, base + 8, &mut ml)?;
+        let mlen = ml[0] as u64;
+        let mut mbuf = vec![0u8; mlen as usize];
+        io::read_at(&mut self.file, base + 9, &mut mbuf)?;
+        let mime = String::from_utf8(mbuf)?;
+        let mut buf8 = [0u8; 8];
+        io::read_at(&mut self.file, base + 9 + mlen, &mut buf8)?;
+        let dlen = u64::from_le_bytes(buf8);
+        let title_rel = 1 + mlen + 8 + dlen;
+        let title = if 8 + title_rel + 2 <= block_size {
+            let tbase = base + 8 + title_rel;
+            let mut tl = [0u8; 2];
+            io::read_at(&mut self.file, tbase, &mut tl)?;
+            let tlen = u16::from_le_bytes(tl) as u64;
+            let mut tbuf = vec![0u8; tlen as usize];
+            if tlen > 0 { io::read_at(&mut self.file, tbase + 2, &mut tbuf)?; }
+            String::from_utf8(tbuf)?
+        } else { String::new() };
+        Ok(ImageMeta { id, mime, title })
     }
 
     pub fn read_image(&mut self, id: u64) -> Result<Image> {

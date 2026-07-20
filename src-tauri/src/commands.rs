@@ -317,6 +317,21 @@ pub struct ImageDto {
     pub data_b64: String,
 }
 
+#[derive(serde::Serialize)]
+pub struct ImageMetaDto {
+    pub id:    u64,
+    pub mime:  String,
+    pub title: String,
+}
+
+#[tauri::command]
+pub fn read_image_meta(state: State<AppState>, id: u64) -> Result<ImageMetaDto, String> {
+    let mut lock = state.current.lock().unwrap();
+    let proj = lock.as_mut().ok_or("No project open")?;
+    let m = proj.file.read_image_meta(id).map_err(|e| e.to_string())?;
+    Ok(ImageMetaDto { id: m.id, mime: m.mime, title: m.title })
+}
+
 #[tauri::command]
 pub fn create_image(
     state: State<AppState>,

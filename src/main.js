@@ -95,6 +95,61 @@ function showError(msg) {
 // THREAD SYSTEM
 // =============================================
 
+const IMAGE_CACHE_BUDGET = (() => {
+    const gb = navigator.deviceMemory ?? 1;
+    return Math.min(gb * 1024 * 1024 * 1024 * 0.10, 500 * 1024 * 1024);
+})();
+
+class ImageCache {
+    constructor(budget) {
+        this._budget  = budget;
+        this._used    = 0;
+        this._entries = new Map();
+    }
+    get(key) {
+        const e = this._entries.get(key);
+        if (!e) return null;
+        e.lastAccess = Date.now();
+        return e.src;
+    }
+    set(key, src) {
+        const size = src.length * 2;
+        if (size > this._budget) return false;
+        if (this._entries.has(key)) this._used -= this._entries.get(key).size;
+        while (this._used + size > this._budget && this._entries.size > 0) this._evict();
+        this._entries.set(key, { src, size, lastAccess: Date.now() });
+        this._used += size;
+        return true;
+    }
+    invalidate(key) {
+        const e = this._entries.get(key);
+        if (e) { this._used -= e.size; this._entries.delete(key); }
+    }
+    invalidateProject(projectName) {
+        const prefix = `${projectName}::`;
+        for (const key of this._entries.keys())
+            if (key.startsWith(prefix)) this.invalidate(key);
+    }
+    _evict() {
+        let oldestKey = null, oldestTime = Infinity;
+        for (const [key, e] of this._entries)
+            if (e.lastAccess < oldestTime) { oldestTime = e.lastAccess; oldestKey = key; }
+        if (!oldestKey) return;
+        const [proj, noteId] = oldestKey.split('::');
+        if (proj === currentProject) {
+            const nd = notesMap.get(noteId);
+            if (nd?.kind === 'image') {
+                nd.el.querySelector('.note-image').src = '';
+                nd.srcLoaded = false;
+            }
+        }
+        this.invalidate(oldestKey);
+    }
+}
+
+const imageCache = new ImageCache(IMAGE_CACHE_BUDGET);
+const cacheKey = (noteId) => `${currentProject}::${noteId}`;
+
 const notesMap = new Map(); // noteId -> { el, anchors, anchorSVG, threadSVG, threadG, previewG }
 let dragState = null;
 
@@ -592,14 +647,13 @@ function setupImageEvents(el, id) {
     });
     el.querySelector('.note-title').addEventListener('blur', async (e) => {
         e.target.contentEditable = 'false';
-        const titleText = e.target.innerText;
-        const invokeId  = toInvokeId(id);
-        console.log('[title] blur fired, id=', invokeId, 'title=', JSON.stringify(titleText));
+        const titleText = e.target.innerText.trimEnd();
         try {
-            await invoke('update_image_title', { id: invokeId, title: titleText });
-            console.log('[title] update_image_title OK');
+            await invoke('update_image_title', { id: toInvokeId(id), title: titleText });
+            const nd = notesMap.get(id);
+            if (nd) nd.imageTitle = titleText;
         }
-        catch (err) { console.error('[title] update_image_title FAILED', err); }
+        catch (err) { console.error('update_image_title failed', err); }
     });
 
     colorBtn.addEventListener('click', (e) => { e.stopPropagation(); paletteHolder.classList.toggle('active'); });
@@ -684,17 +738,35 @@ function makeAspectResizable(el, noteId, aspectRatio) {
     });
 }
 
-async function loadImageBody(id, noteData) {
-    noteData.bodyLoaded = true;
+async function loadImageMeta(id, noteData) {
+    if (noteData.imageTitle !== null) {
+        if (noteData.imageTitle) noteData.el.querySelector('.note-title').innerText = noteData.imageTitle;
+        return;
+    }
     try {
-        const img  = await invoke('read_image', { id: toInvokeId(id) });
-        console.log('[title] read_image id=', id, 'title=', JSON.stringify(img.title));
-        const src  = `data:${img.mime};base64,${img.data_b64}`;
+        const meta = await invoke('read_image_meta', { id: toInvokeId(id) });
+        noteData.imageTitle = meta.title;
+        if (meta.title) noteData.el.querySelector('.note-title').innerText = meta.title;
+    } catch (e) { console.error('loadImageMeta failed', id, e); }
+}
+
+async function loadImageSrc(id, noteData) {
+    if (noteData.srcLoaded) return;
+    const key = cacheKey(id);
+    const cached = imageCache.get(key);
+    if (cached !== null) {
+        noteData.el.querySelector('.note-image').src = cached;
+        noteData.srcLoaded = true;
+        return;
+    }
+    try {
+        const img = await invoke('read_image', { id: toInvokeId(id) });
+        const src = `data:${img.mime};base64,${img.data_b64}`;
         noteData.el.querySelector('.note-image').src = src;
-        if (img.title) noteData.el.querySelector('.note-title').innerText = img.title;
+        noteData.srcLoaded = true;
+        imageCache.set(key, src);
     } catch (e) {
-        console.error('loadImageBody failed', id, e);
-        noteData.bodyLoaded = false;
+        console.error('loadImageSrc failed', id, e);
     }
 }
 
@@ -779,6 +851,8 @@ function createNoteShell(slot, imageData = null) {
         slot:        { x: slot.x, y: slot.y, w: slot.w, h: slot.h },
         rawMarkdown: '',
         bodyLoaded:  false,
+        srcLoaded:   false,
+        imageTitle:  null,
     });
 
     makeDraggable(el, id);
@@ -788,9 +862,13 @@ function createNoteShell(slot, imageData = null) {
         makeAspectResizable(el, id, ratio);
         setupImageEvents(el, id);
         if (imageData) {
-            // Freshly created — set src directly, no need to load from backend
-            el.querySelector('.note-image').src = `data:${imageData.mime};base64,${imageData.dataB64}`;
-            notesMap.get(id).bodyLoaded = true;
+            const src = `data:${imageData.mime};base64,${imageData.dataB64}`;
+            el.querySelector('.note-image').src = src;
+            const nd = notesMap.get(id);
+            nd.bodyLoaded  = true;
+            nd.srcLoaded   = true;
+            nd.imageTitle  = '';
+            imageCache.set(cacheKey(id), src);
         }
     } else {
         makeResizable(el, id);
@@ -929,8 +1007,11 @@ async function loadNoteBody(id, noteData) {
 }
 
 function unloadNoteBody(noteData) {
+    if (noteData.kind === 'image') {
+        noteData.bodyLoaded = false;
+        return;
+    }
     const content = noteData.el.querySelector('.note-content');
-    // Never unload while the user is editing
     if (content && document.activeElement === content) return;
     noteData.bodyLoaded = false;
     noteData.rawMarkdown = '';
@@ -944,8 +1025,13 @@ function updateVisibleNotes() {
         noteData.el.style.display = visible ? '' : 'none';
 
         if (visible && zoom >= CULL.NOTE_BODY_MIN_ZOOM && !noteData.bodyLoaded) {
-            if (noteData.kind === 'image') loadImageBody(id, noteData);
-            else                           loadNoteBody(id, noteData);
+            if (noteData.kind === 'image') {
+                noteData.bodyLoaded = true;
+                loadImageMeta(id, noteData);
+                loadImageSrc(id, noteData);
+            } else {
+                loadNoteBody(id, noteData);
+            }
         }
         if (!visible && noteData.bodyLoaded) {
             unloadNoteBody(noteData);
@@ -1388,6 +1474,7 @@ async function onAddProject(name) {
 async function onRenameProject(oldName, newName) {
     try {
         await invoke('rename_project', { oldName, newName });
+        imageCache.invalidateProject(oldName);
         const idx = projects.indexOf(oldName);
         if (idx >= 0) projects[idx] = newName;
         if (currentProject === oldName) {

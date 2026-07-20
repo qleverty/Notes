@@ -45,7 +45,8 @@ pub struct WireInfo {
 pub struct Note  { pub id: u64, pub title: String, pub body: String }
 
 #[derive(Debug, Clone)]
-pub struct Image { pub id: u64, pub mime: String, pub data: Vec<u8>, pub title: String }
+pub struct Image    { pub id: u64, pub mime: String, pub data: Vec<u8>, pub title: String }
+pub struct ImageMeta { pub id: u64, pub mime: String, pub title: String }
 
 #[derive(Debug)]
 pub enum NotsError {
