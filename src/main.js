@@ -95,60 +95,6 @@ function showError(msg) {
 // THREAD SYSTEM
 // =============================================
 
-const IMAGE_CACHE_BUDGET = (() => {
-    const gb = navigator.deviceMemory ?? 1;
-    return Math.min(gb * 1024 * 1024 * 1024 * 0.10, 500 * 1024 * 1024);
-})();
-
-class ImageCache {
-    constructor(budget) {
-        this._budget  = budget;
-        this._used    = 0;
-        this._entries = new Map();
-    }
-    get(key) {
-        const e = this._entries.get(key);
-        if (!e) return null;
-        e.lastAccess = Date.now();
-        return e.src;
-    }
-    set(key, src) {
-        const size = src.length * 2;
-        if (size > this._budget) return false;
-        if (this._entries.has(key)) this._used -= this._entries.get(key).size;
-        while (this._used + size > this._budget && this._entries.size > 0) this._evict();
-        this._entries.set(key, { src, size, lastAccess: Date.now() });
-        this._used += size;
-        return true;
-    }
-    invalidate(key) {
-        const e = this._entries.get(key);
-        if (e) { this._used -= e.size; this._entries.delete(key); }
-    }
-    invalidateProject(projectName) {
-        const prefix = `${projectName}::`;
-        for (const key of this._entries.keys())
-            if (key.startsWith(prefix)) this.invalidate(key);
-    }
-    _evict() {
-        let oldestKey = null, oldestTime = Infinity;
-        for (const [key, e] of this._entries)
-            if (e.lastAccess < oldestTime) { oldestTime = e.lastAccess; oldestKey = key; }
-        if (!oldestKey) return;
-        const [proj, noteId] = oldestKey.split('::');
-        if (proj === currentProject) {
-            const nd = notesMap.get(noteId);
-            if (nd?.kind === 'image') {
-                nd.el.querySelector('.note-image').src = '';
-                nd.srcLoaded = false;
-            }
-        }
-        this.invalidate(oldestKey);
-    }
-}
-
-const imageCache = new ImageCache(IMAGE_CACHE_BUDGET);
-const cacheKey = (noteId) => `${currentProject}::${noteId}`;
 
 const notesMap = new Map(); // noteId -> { el, anchors, anchorSVG, threadSVG, threadG, previewG }
 let dragState = null;
@@ -752,19 +698,10 @@ async function loadImageMeta(id, noteData) {
 
 async function loadImageSrc(id, noteData) {
     if (noteData.srcLoaded) return;
-    const key = cacheKey(id);
-    const cached = imageCache.get(key);
-    if (cached !== null) {
-        noteData.el.querySelector('.note-image').src = cached;
-        noteData.srcLoaded = true;
-        return;
-    }
     try {
         const img = await invoke('read_image', { id: toInvokeId(id) });
-        const src = `data:${img.mime};base64,${img.data_b64}`;
-        noteData.el.querySelector('.note-image').src = src;
+        noteData.el.querySelector('.note-image').src = `data:${img.mime};base64,${img.data_b64}`;
         noteData.srcLoaded = true;
-        imageCache.set(key, src);
     } catch (e) {
         console.error('loadImageSrc failed', id, e);
     }
@@ -868,7 +805,6 @@ function createNoteShell(slot, imageData = null) {
             nd.bodyLoaded  = true;
             nd.srcLoaded   = true;
             nd.imageTitle  = '';
-            imageCache.set(cacheKey(id), src);
         }
     } else {
         makeResizable(el, id);
@@ -1474,7 +1410,6 @@ async function onAddProject(name) {
 async function onRenameProject(oldName, newName) {
     try {
         await invoke('rename_project', { oldName, newName });
-        imageCache.invalidateProject(oldName);
         const idx = projects.indexOf(oldName);
         if (idx >= 0) projects[idx] = newName;
         if (currentProject === oldName) {
