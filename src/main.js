@@ -10,6 +10,7 @@ const imageInput  = document.getElementById('image-file-input');
 const canvas      = document.getElementById('canvas');
 let zIndexCounter = 10;
 let zoom = 1, panX = 0, panY = 0;
+let contentBudgetUsed = 0;
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -473,7 +474,7 @@ function setupNoteEvents(el, id) {
     // ── Content editing ──
     content.addEventListener('focus', () => {
         content.style.whiteSpace = 'pre-wrap';
-        content.innerText = noteData.rawMarkdown || '';
+        content.innerText = noteData.rawMarkdown ?? '';
     });
     content.addEventListener('blur', () => {
         noteData.rawMarkdown = content.innerText;
@@ -699,9 +700,15 @@ async function loadImageMeta(id, noteData) {
 async function loadImageSrc(id, noteData) {
     if (noteData.srcLoaded) return;
     try {
-        const img = await invoke('read_image', { id: toInvokeId(id) });
-        noteData.el.querySelector('.note-image').src = `data:${img.mime};base64,${img.data_b64}`;
+        const imgData = await invoke('read_image', { id: toInvokeId(id) });
+        const imgEl = noteData.el.querySelector('.note-image');
+        imgEl.src = `data:${imgData.mime};base64,${imgData.data_b64}`;
         noteData.srcLoaded = true;
+        imgEl.decode().then(() => {
+            const bytes = imgEl.naturalWidth * imgEl.naturalHeight * 4;
+            contentBudgetUsed += bytes;
+            noteData.cachedBytes = bytes;
+        }).catch(() => {});
     } catch (e) {
         console.error('loadImageSrc failed', id, e);
     }
@@ -786,10 +793,12 @@ function createNoteShell(slot, imageData = null) {
         el, anchors, anchorSVG, threadSVG, threadG, previewG,
         kind,
         slot:        { x: slot.x, y: slot.y, w: slot.w, h: slot.h },
-        rawMarkdown: '',
+        rawMarkdown: null,
         bodyLoaded:  false,
         srcLoaded:   false,
         imageTitle:  null,
+        lastSeen:    0,
+        cachedBytes: 0,
     });
 
     makeDraggable(el, id);
@@ -799,12 +808,17 @@ function createNoteShell(slot, imageData = null) {
         makeAspectResizable(el, id, ratio);
         setupImageEvents(el, id);
         if (imageData) {
-            const src = `data:${imageData.mime};base64,${imageData.dataB64}`;
-            el.querySelector('.note-image').src = src;
+            const imgEl = el.querySelector('.note-image');
+            imgEl.src = `data:${imageData.mime};base64,${imageData.dataB64}`;
             const nd = notesMap.get(id);
-            nd.bodyLoaded  = true;
-            nd.srcLoaded   = true;
-            nd.imageTitle  = '';
+            nd.bodyLoaded = true;
+            nd.srcLoaded  = true;
+            nd.imageTitle = '';
+            imgEl.decode().then(() => {
+                const bytes = imgEl.naturalWidth * imgEl.naturalHeight * 4;
+                contentBudgetUsed += bytes;
+                nd.cachedBytes = bytes;
+            }).catch(() => {});
         }
     } else {
         makeResizable(el, id);
@@ -930,9 +944,16 @@ function renderNoteContent(noteData) {
 
 async function loadNoteBody(id, noteData) {
     noteData.bodyLoaded = true;
+    if (noteData.rawMarkdown !== null) {
+        renderNoteContent(noteData);
+        return;
+    }
     try {
         const note = await invoke('read_note', { id: toInvokeId(id) });
         noteData.rawMarkdown = note.body;
+        const bytes = (note.body.length + (note.title?.length ?? 0)) * 2;
+        contentBudgetUsed += bytes;
+        noteData.cachedBytes = bytes;
         const titleEl = noteData.el.querySelector('.note-title');
         if (titleEl && note.title) titleEl.innerText = note.title;
         renderNoteContent(noteData);
@@ -950,29 +971,54 @@ function unloadNoteBody(noteData) {
     const content = noteData.el.querySelector('.note-content');
     if (content && document.activeElement === content) return;
     noteData.bodyLoaded = false;
-    noteData.rawMarkdown = '';
     if (content) content.innerHTML = '';
 }
 
 function updateVisibleNotes() {
     const viewRect = getViewRect();
+    const now = Date.now();
     notesMap.forEach((noteData, id) => {
         const visible = rectsOverlap(noteData.slot, viewRect);
         noteData.el.style.display = visible ? '' : 'none';
 
-        if (visible && zoom >= CULL.NOTE_BODY_MIN_ZOOM && !noteData.bodyLoaded) {
-            if (noteData.kind === 'image') {
-                noteData.bodyLoaded = true;
-                loadImageMeta(id, noteData);
-                loadImageSrc(id, noteData);
-            } else {
-                loadNoteBody(id, noteData);
+        if (visible) {
+            noteData.lastSeen = now;
+            if (zoom >= CULL.NOTE_BODY_MIN_ZOOM && !noteData.bodyLoaded) {
+                if (noteData.kind === 'image') {
+                    noteData.bodyLoaded = true;
+                    loadImageMeta(id, noteData);
+                    loadImageSrc(id, noteData);
+                } else {
+                    loadNoteBody(id, noteData);
+                }
             }
         }
         if (!visible && noteData.bodyLoaded) {
             unloadNoteBody(noteData);
         }
     });
+    evictIfNeeded();
+}
+
+function evictIfNeeded() {
+    while (contentBudgetUsed > CONTENT_BUDGET) {
+        let oldest = null, oldestTime = Infinity;
+        notesMap.forEach((noteData) => {
+            if (noteData.cachedBytes > 0 && !noteData.bodyLoaded && noteData.lastSeen < oldestTime) {
+                oldestTime = noteData.lastSeen;
+                oldest = noteData;
+            }
+        });
+        if (!oldest) break;
+        if (oldest.kind === 'image') {
+            oldest.el.querySelector('.note-image').src = '';
+            oldest.srcLoaded = false;
+        } else {
+            oldest.rawMarkdown = null;
+        }
+        contentBudgetUsed -= oldest.cachedBytes;
+        oldest.cachedBytes = 0;
+    }
 }
 
 window.addEventListener('resize', () => {
@@ -1373,6 +1419,7 @@ function clearCanvas() {
     });
     notesMap.clear();
     wiresMap.clear();
+    contentBudgetUsed = 0;
     saveBuffer.flushAll();
 }
 
