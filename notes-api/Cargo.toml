@@ -5,3 +5,6 @@ edition = "2024"
 
 [lib]
 name = "notes_api"
+
+[dependencies]
+rusqlite = { version = "0.31", features = ["bundled", "blob"] }
