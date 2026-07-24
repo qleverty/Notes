@@ -311,9 +311,10 @@ pub fn delete_wire(state: State<AppState>, id: u64) -> Result<(), String> {
 
 #[derive(Serialize)]
 pub struct SearchResultDto {
-    pub id:   u64,
-    pub kind: String,
-    pub title: String,
+    pub id:      u64,
+    pub kind:    String,
+    pub title:   String,
+    pub snippet: String,
 }
 
 #[tauri::command]
@@ -323,9 +324,10 @@ pub fn search_notes(state: State<AppState>, query: String) -> Result<Vec<SearchR
     proj.file.search(&query)
         .map_err(|e| e.to_string())
         .map(|results| results.into_iter().map(|r| SearchResultDto {
-            id:    r.id,
-            kind:  match r.kind { notes_api::ElementKind::Note => "note", notes_api::ElementKind::Image => "image" }.into(),
-            title: r.title,
+            id:      r.id,
+            kind:    match r.kind { notes_api::ElementKind::Note => "note", notes_api::ElementKind::Image => "image" }.into(),
+            title:   r.title,
+            snippet: r.snippet,
         }).collect())
 }
 

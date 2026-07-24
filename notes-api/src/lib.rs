@@ -238,17 +238,24 @@ impl NotesFile {
     }
 
     pub fn search(&self, query: &str) -> Result<Vec<SearchResult>> {
+        let escaped = format!("\"{}\"", query.replace('"', "\"\""));
         let mut stmt = self.conn.prepare(
-            "SELECT note_id, note_kind, title FROM search WHERE search MATCH ?1 ORDER BY rank"
+            "SELECT s.note_id, s.note_kind, s.title,
+                CASE s.note_kind
+                    WHEN 'note' THEN (SELECT SUBSTR(body, 1, 150) FROM notes WHERE id = s.note_id)
+                    ELSE ''
+                END
+             FROM search s WHERE s MATCH ?1 ORDER BY rank"
         )?;
-        let results = stmt.query_map(params![query], |row| {
-            let id: i64        = row.get(0)?;
+        let results = stmt.query_map(params![escaped], |row| {
+            let id: i64          = row.get(0)?;
             let kind_str: String = row.get(1)?;
-            let title: String  = row.get(2)?;
-            Ok((id as u64, kind_str, title))
-        })?.filter_map(|r| r.ok()).map(|(id, kind_str, title)| {
+            let title: String    = row.get(2)?;
+            let snippet: String  = row.get(3)?;
+            Ok((id as u64, kind_str, title, snippet))
+        })?.filter_map(|r| r.ok()).map(|(id, kind_str, title, snippet)| {
             let kind = if kind_str == "image" { ElementKind::Image } else { ElementKind::Note };
-            SearchResult { id, kind, title }
+            SearchResult { id, kind, title, snippet }
         }).collect();
         Ok(results)
     }

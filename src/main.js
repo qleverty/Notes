@@ -1098,6 +1098,8 @@ function syncWidth() {
     textMeasurer.textContent = currentProject;
     const w = Math.max(PROJ_MIN_W, textMeasurer.offsetWidth + 38);
     projRoot.style.width = w + 'px';
+    searchRoot.style.width = w + 'px';
+    searchRoot.style.top = (projRoot.offsetTop + projRoot.offsetHeight + 2) + 'px';
 }
 
 function openDropdown() {
@@ -1105,6 +1107,7 @@ function openDropdown() {
     projRoot.classList.add('is-open');
     projListWrap.style.display = 'flex';
     renderList();
+    closeSearch();
 }
 
 function closeDropdown() {
@@ -1281,11 +1284,150 @@ projSelector.addEventListener('click', () => {
 });
 
 document.addEventListener('mousedown', (e) => {
-    if (!dropdownOpen) return;
-    if (projRoot.contains(e.target)) return;
-    if (projRoot.querySelector('input:focus')) return;
+    if (dropdownOpen && !projRoot.contains(e.target) && !projRoot.querySelector('input:focus')) {
+        closeDropdown();
+    }
+    if (searchOpen && !searchRoot.contains(e.target)) {
+        closeSearch();
+    }
+});
+
+// =============================================
+// SEARCH
+// =============================================
+
+let searchOpen = false;
+let searchDebounce = null;
+
+const searchRoot    = document.getElementById('search-root');
+const searchInput   = document.getElementById('search-input');
+const searchClear   = document.getElementById('search-clear');
+const searchResults = document.getElementById('search-results');
+
+function openSearch() {
+    searchOpen = true;
+    searchRoot.classList.add('is-open');
+}
+
+function closeSearch() {
+    searchOpen = false;
+    searchRoot.classList.remove('is-open');
+}
+
+function clearSearch() {
+    searchInput.value = '';
+    searchRoot.classList.remove('has-text');
+    closeSearch();
+    searchResults.innerHTML = '';
+    searchInput.focus();
+}
+
+function buildSearchItem(result) {
+    const [r, g, b] = result.color;
+    const item = document.createElement('div');
+    item.className = 'search-item';
+
+    const stripe = document.createElement('div');
+    stripe.className = 'search-item-stripe';
+    stripe.style.background = `rgb(${r},${g},${b})`;
+
+    const body = document.createElement('div');
+    body.className = 'search-item-body';
+
+    if (result.kind === 'image') {
+        const thumb = document.createElement('div');
+        thumb.className = 'search-item-thumb';
+        thumb.innerHTML = '<svg width="22" height="18" viewBox="0 0 40 32"><rect x="2" y="2" width="36" height="28" rx="1" stroke="#555" stroke-width="2.5" fill="none"/><circle cx="13" cy="12" r="4" fill="#555"/><polyline points="2,26 14,16 22,22 30,12 38,20 38,30 2,30" fill="#555" opacity="0.5"/></svg>';
+        body.appendChild(thumb);
+    }
+
+    const text = document.createElement('div');
+    text.className = 'search-item-text';
+
+    const title = document.createElement('div');
+    title.className = 'search-item-title' + (result.title ? '' : ' no-title');
+    title.textContent = result.title || (result.kind === 'image' ? 'без названия' : '');
+
+    text.appendChild(title);
+
+    if (result.kind === 'note') {
+        const preview = document.createElement('div');
+        preview.className = 'search-item-preview';
+        preview.textContent = result.snippet || result.title || '';
+        text.appendChild(preview);
+    } else {
+        const preview = document.createElement('div');
+        preview.className = 'search-item-preview';
+        preview.textContent = 'картинка';
+        text.appendChild(preview);
+    }
+
+    body.appendChild(text);
+    item.appendChild(body);
+    item.appendChild(stripe);
+
+    item.addEventListener('click', () => focusNote(String(result.id)));
+    return item;
+}
+
+async function runSearch(query) {
+    if (query.length < 2) {
+        closeSearch();
+        searchResults.innerHTML = '';
+        return;
+    }
+
+    let results;
+    try {
+        results = await invoke('search_notes', { query });
+    } catch (e) {
+        console.error('search_notes failed', e);
+        return;
+    }
+
+    openSearch();
+    searchResults.innerHTML = '';
+
+    if (results.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'search-empty';
+        empty.textContent = 'Ничего не найдено';
+        searchResults.appendChild(empty);
+        return;
+    }
+
+    results.forEach(r => {
+        const nd = notesMap.get(String(r.id));
+        r.color = nd ? nd.slot.color ?? [180, 180, 180] : [180, 180, 180];
+        searchResults.appendChild(buildSearchItem(r));
+    });
+}
+
+function focusNote(id) {
+    const nd = notesMap.get(id);
+    if (!nd) return;
+    const { x, y, w, h } = nd.slot;
+    panX = Math.round(window.innerWidth  / 2 - (x + w / 2) * zoom);
+    panY = Math.round(window.innerHeight / 2 - (y + h / 2) * zoom);
+    applyTransform();
+    updateVisibleNotes();
+    closeSearch();
+    searchInput.blur();
+}
+
+searchInput.addEventListener('input', () => {
+    const val = searchInput.value;
+    searchRoot.classList.toggle('has-text', val.length > 0);
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => runSearch(val), 200);
+});
+
+searchInput.addEventListener('focus', () => {
+    if (searchInput.value.length >= 2) openSearch();
     closeDropdown();
 });
+
+searchClear.addEventListener('click', clearSearch);
 
 // =============================================
 // DRAG-TO-SORT
