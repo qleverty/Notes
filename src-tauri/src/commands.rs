@@ -11,22 +11,20 @@ use crate::projects;
 
 #[derive(Serialize)]
 pub struct SlotDto {
-    pub id:          u64,
-    pub kind:        String,   // "note" | "image"
+    pub id:   u64,
+    pub kind: String,
     pub x: i64, pub y: i64,
     pub w: i64, pub h: i64,
-    pub color:       [u8; 3],
-    pub data_offset: u64,
+    pub color: [u8; 3],
 }
 
 impl From<SlotInfo> for SlotDto {
     fn from(s: SlotInfo) -> Self {
         Self {
-            id:          s.id,
-            kind:        match s.kind { ElementKind::Note => "note", ElementKind::Image => "image" }.into(),
+            id:   s.id,
+            kind: match s.kind { ElementKind::Note => "note", ElementKind::Image => "image" }.into(),
             x: s.x, y: s.y, w: s.w, h: s.h,
-            color:       s.color,
-            data_offset: s.data_offset,
+            color: s.color,
         }
     }
 }
@@ -203,6 +201,8 @@ pub fn delete_project(state: State<AppState>, name: String) -> Result<DeleteProj
     }
     let path = projects::project_path(&name).ok_or("Cannot resolve AppData")?;
     std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(path.with_extension("notes-wal"));
+    let _ = std::fs::remove_file(path.with_extension("notes-shm"));
 
     let current  = state.current.lock().unwrap().as_ref().map(|p| p.name.clone()).unwrap_or_default();
     let projects = projects::list_projects().map_err(|e| e.to_string())?;
@@ -240,8 +240,8 @@ pub fn create_note(
 
 #[tauri::command]
 pub fn read_note(state: State<AppState>, id: u64) -> Result<NoteDto, String> {
-    let mut lock = state.current.lock().unwrap();
-    let proj = lock.as_mut().ok_or("No project open")?;
+    let lock = state.current.lock().unwrap();
+    let proj = lock.as_ref().ok_or("No project open")?;
     let note = proj.file.read_note(id).map_err(|e| e.to_string())?;
     Ok(NoteDto { id: note.id, title: note.title, body: note.body })
 }
@@ -306,7 +306,27 @@ pub fn create_wire(
 pub fn delete_wire(state: State<AppState>, id: u64) -> Result<(), String> {
     let mut lock = state.current.lock().unwrap();
     let proj = lock.as_mut().ok_or("No project open")?;
-    proj.file.delete_element(id).map_err(|e| e.to_string())
+    proj.file.delete_wire(id).map_err(|e| e.to_string())
+}
+
+#[derive(Serialize)]
+pub struct SearchResultDto {
+    pub id:   u64,
+    pub kind: String,
+    pub title: String,
+}
+
+#[tauri::command]
+pub fn search_notes(state: State<AppState>, query: String) -> Result<Vec<SearchResultDto>, String> {
+    let lock = state.current.lock().unwrap();
+    let proj = lock.as_ref().ok_or("No project open")?;
+    proj.file.search(&query)
+        .map_err(|e| e.to_string())
+        .map(|results| results.into_iter().map(|r| SearchResultDto {
+            id:    r.id,
+            kind:  match r.kind { notes_api::ElementKind::Note => "note", notes_api::ElementKind::Image => "image" }.into(),
+            title: r.title,
+        }).collect())
 }
 
 #[derive(Serialize)]
@@ -326,8 +346,8 @@ pub struct ImageMetaDto {
 
 #[tauri::command]
 pub fn read_image_meta(state: State<AppState>, id: u64) -> Result<ImageMetaDto, String> {
-    let mut lock = state.current.lock().unwrap();
-    let proj = lock.as_mut().ok_or("No project open")?;
+    let lock = state.current.lock().unwrap();
+    let proj = lock.as_ref().ok_or("No project open")?;
     let m = proj.file.read_image_meta(id).map_err(|e| e.to_string())?;
     Ok(ImageMetaDto { id: m.id, mime: m.mime, title: m.title })
 }
@@ -350,8 +370,8 @@ pub fn create_image(
 
 #[tauri::command]
 pub fn read_image(state: State<AppState>, id: u64) -> Result<ImageDto, String> {
-    let mut lock = state.current.lock().unwrap();
-    let proj = lock.as_mut().ok_or("No project open")?;
+    let lock = state.current.lock().unwrap();
+    let proj = lock.as_ref().ok_or("No project open")?;
     let img = proj.file.read_image(id).map_err(|e| e.to_string())?;
     Ok(ImageDto { id: img.id, mime: img.mime, title: img.title, data_b64: STANDARD.encode(&img.data) })
 }
