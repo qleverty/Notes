@@ -240,12 +240,12 @@ impl NotesFile {
     pub fn search(&self, query: &str) -> Result<Vec<SearchResult>> {
         let escaped = format!("\"{}\"", query.replace('"', "\"\""));
         let mut stmt = self.conn.prepare(
-            "SELECT s.note_id, s.note_kind, s.title,
-                CASE s.note_kind
-                    WHEN 'note' THEN (SELECT SUBSTR(body, 1, 150) FROM notes WHERE id = s.note_id)
+            "SELECT note_id, note_kind, title,
+                CASE note_kind
+                    WHEN 'note' THEN (SELECT SUBSTR(body, 1, 150) FROM notes WHERE id = note_id)
                     ELSE ''
                 END
-             FROM search s WHERE s MATCH ?1 ORDER BY rank"
+             FROM search WHERE search MATCH ?1 ORDER BY rank"
         )?;
         let results = stmt.query_map(params![escaped], |row| {
             let id: i64          = row.get(0)?;

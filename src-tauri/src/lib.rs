@@ -29,6 +29,7 @@ pub fn run() {
             commands::read_image,
             commands::read_image_meta,
             commands::update_image_title,
+            commands::search_notes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

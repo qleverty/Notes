@@ -492,7 +492,7 @@ function setupNoteEvents(el, id) {
     });
     title.addEventListener('blur',  () => { title.contentEditable = 'false'; });
     title.addEventListener('input', () => {
-        saveBuffer.schedule(noteId, title.innerText, noteData.rawMarkdown);
+        saveBuffer.schedule(noteId, title.innerText, noteData.rawMarkdown ?? '');
     });
 
     // ── Color picker ──
@@ -1098,8 +1098,11 @@ function syncWidth() {
     textMeasurer.textContent = currentProject;
     const w = Math.max(PROJ_MIN_W, textMeasurer.offsetWidth + 38);
     projRoot.style.width = w + 'px';
-    searchRoot.style.width = w + 'px';
-    searchRoot.style.top = (projRoot.offsetTop + projRoot.offsetHeight + 2) + 'px';
+    const sr = document.getElementById('search-root');
+    if (sr) {
+        sr.style.width = w + 'px';
+        sr.style.top = (projRoot.offsetTop + projRoot.offsetHeight + 2) + 'px';
+    }
 }
 
 function openDropdown() {
