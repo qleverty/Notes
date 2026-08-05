@@ -858,10 +858,15 @@ function makeDraggable(el, noteId) {
         e.preventDefault();
 
         const noteData  = notesMap.get(noteId);
+        if (!noteData) {
+            console.error('makeDraggable: noteId not in notesMap', noteId, [...notesMap.keys()]);
+            return;
+        }
         startClientX    = e.clientX;
         startClientY    = e.clientY;
         startWorldX     = noteData.slot.x;
         startWorldY     = noteData.slot.y;
+        console.log('DRAG START', noteId, 'slot:', noteData.slot.x, noteData.slot.y, 'el.left:', el.style.left, 'el.top:', el.style.top);
 
         const onMove = (e) => {
             const nx = Math.round(startWorldX + (e.clientX - startClientX) / zoom);
