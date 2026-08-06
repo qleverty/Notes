@@ -527,6 +527,7 @@ function setupNoteEvents(el, id) {
         const rgb = hslToRgb(hue, 70, 85);
         try {
             await invoke('set_color', { id: toInvokeId(noteId), color: rgb });
+            notesMap.get(noteId).slot.color = rgb;
         } catch (e) { console.error('set_color failed:', e); }
     });
 
@@ -623,7 +624,10 @@ function setupImageEvents(el, id) {
         isDraggingColor = false;
         const hue = handleColorDrag(e);
         const rgb = hslToRgb(hue, 70, 85);
-        try { await invoke('set_color', { id: toInvokeId(noteId), color: rgb }); }
+        try {
+            await invoke('set_color', { id: toInvokeId(noteId), color: rgb });
+            notesMap.get(noteId).slot.color = rgb;
+        }
         catch (e) { console.error('set_color failed:', e); }
     });
 
@@ -792,7 +796,7 @@ function createNoteShell(slot, imageData = null) {
     notesMap.set(id, {
         el, anchors, anchorSVG, threadSVG, threadG, previewG,
         kind,
-        slot:        { x: slot.x, y: slot.y, w: slot.w, h: slot.h },
+        slot:        { ...slot },
         rawMarkdown: null,
         bodyLoaded:  false,
         srcLoaded:   false,
@@ -1371,8 +1375,8 @@ function buildSearchItem(result) {
     }
 
     body.appendChild(text);
-    item.appendChild(body);
     item.appendChild(stripe);
+    item.appendChild(body);
 
     item.addEventListener('click', () => focusNote(String(result.id)));
     return item;
