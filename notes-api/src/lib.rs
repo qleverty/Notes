@@ -9,6 +9,10 @@ use rusqlite::{Connection, params};
 use std::path::Path;
 
 const SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS elements (
+    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS notes (
     id      INTEGER PRIMARY KEY,
     x       INTEGER NOT NULL,
@@ -131,13 +135,20 @@ impl NotesFile {
         ).map_err(|e| map_not_found(e, id))
     }
 
+    fn reserve_id(tx: &rusqlite::Transaction, kind: &str) -> Result<u64> {
+        tx.execute("INSERT INTO elements (kind) VALUES (?1)", params![kind])?;
+        Ok(tx.last_insert_rowid() as u64)
+    }
+
     pub fn create_note(&mut self, x: i64, y: i64, w: i64, h: i64, title: &str, body: &str, color: [u8; 3]) -> Result<u64> {
         let [r, g, b] = color.map(|c| c as i64);
-        self.conn.execute(
-            "INSERT INTO notes (x,y,w,h,color_r,color_g,color_b,title,body) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-            params![x, y, w, h, r, g, b, title, body],
+        let tx = self.conn.transaction()?;
+        let id = Self::reserve_id(&tx, "note")?;
+        tx.execute(
+            "INSERT INTO notes (id,x,y,w,h,color_r,color_g,color_b,title,body) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+            params![id as i64, x, y, w, h, r, g, b, title, body],
         )?;
-        let id = self.conn.last_insert_rowid() as u64;
+        tx.commit()?;
         self.slots.push(SlotInfo { id, kind: ElementKind::Note, x, y, w, h, color });
         Ok(id)
     }
@@ -145,11 +156,13 @@ impl NotesFile {
     pub fn create_image(&mut self, x: i64, y: i64, w: i64, h: i64, mime: &str, data: &[u8], title: &str, color: [u8; 3]) -> Result<u64> {
         if title.len() > 255 { return Err(NotsError::TitleTooLong); }
         let [r, g, b] = color.map(|c| c as i64);
-        self.conn.execute(
-            "INSERT INTO images (x,y,w,h,color_r,color_g,color_b,title,mime,data) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
-            params![x, y, w, h, r, g, b, title, mime, data],
+        let tx = self.conn.transaction()?;
+        let id = Self::reserve_id(&tx, "image")?;
+        tx.execute(
+            "INSERT INTO images (id,x,y,w,h,color_r,color_g,color_b,title,mime,data) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+            params![id as i64, x, y, w, h, r, g, b, title, mime, data],
         )?;
-        let id = self.conn.last_insert_rowid() as u64;
+        tx.commit()?;
         self.slots.push(SlotInfo { id, kind: ElementKind::Image, x, y, w, h, color });
         Ok(id)
     }
@@ -221,9 +234,10 @@ impl NotesFile {
             .map(|w| w.id)
             .collect();
 
-        self.conn.execute("DELETE FROM notes  WHERE id=?1",                  params![id as i64])?;
-        self.conn.execute("DELETE FROM images WHERE id=?1",                  params![id as i64])?;
-        self.conn.execute("DELETE FROM wires  WHERE from_id=?1 OR to_id=?1", params![id as i64])?;
+        self.conn.execute("DELETE FROM notes    WHERE id=?1",                  params![id as i64])?;
+        self.conn.execute("DELETE FROM images   WHERE id=?1",                  params![id as i64])?;
+        self.conn.execute("DELETE FROM wires    WHERE from_id=?1 OR to_id=?1", params![id as i64])?;
+        self.conn.execute("DELETE FROM elements WHERE id=?1",                  params![id as i64])?;
 
         self.slots.retain(|s| s.id != id);
         self.wires.retain(|w| !wire_ids.contains(&w.id));
