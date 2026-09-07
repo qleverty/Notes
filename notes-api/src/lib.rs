@@ -252,7 +252,11 @@ impl NotesFile {
     }
 
     pub fn search(&self, query: &str) -> Result<Vec<SearchResult>> {
-        let escaped = format!("\"{}\"", query.replace('"', "\"\""));
+        let escaped: String = query.split_whitespace()
+            .map(|tok| format!("\"{}\"*", tok.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if escaped.is_empty() { return Ok(Vec::new()); }
         let mut stmt = self.conn.prepare(
             "SELECT note_id, note_kind, title,
                 CASE note_kind
