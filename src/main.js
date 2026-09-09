@@ -553,6 +553,18 @@ function setupNoteEvents(el, id) {
         if (e.target.closest('.header-btn') || e.target.closest('.color-palette-holder')) return;
         title.contentEditable = 'true'; title.focus();
     });
+    const titleEncoder = new TextEncoder();
+    title.addEventListener('beforeinput', (e) => {
+        if (e.inputType === 'insertParagraph' || e.inputType === 'insertLineBreak') {
+            e.preventDefault();
+            return;
+        }
+        const incoming = e.inputType === 'insertFromPaste'
+            ? (e.dataTransfer?.getData('text/plain') ?? '')
+            : (e.data ?? '');
+        const current = e.target.innerText.trimEnd();
+        if (titleEncoder.encode(current + incoming).length >= 255) e.preventDefault();
+    });
     title.addEventListener('blur',  () => { title.contentEditable = 'false'; });
     title.addEventListener('input', () => {
         saveBuffer.schedule(noteId, title.innerText, noteData.rawMarkdown ?? '');
@@ -1185,7 +1197,12 @@ function syncWidth() {
     const sr = document.getElementById('search-root');
     if (sr) {
         sr.style.width = w + 'px';
-        sr.style.top = (projRoot.offsetTop + projRoot.offsetHeight + 2) + 'px';
+        // Anchor to the selector itself (fixed height) rather than projRoot
+        // (which grows when the dropdown list is open) — the search bar
+        // is hidden whenever the dropdown is open anyway, and this keeps
+        // it flush against the selector, forming one visual block, instead
+        // of drifting down as the project list grows.
+        sr.style.top = projSelector.getBoundingClientRect().bottom + 'px';
     }
 }
 
@@ -1195,6 +1212,7 @@ function openDropdown() {
     projListWrap.style.display = 'flex';
     renderList();
     closeSearch();
+    searchRoot.style.display = 'none';
 }
 
 function closeDropdown() {
@@ -1202,6 +1220,7 @@ function closeDropdown() {
     projRoot.classList.remove('is-open');
     projListWrap.style.display = 'none';
     hideAddInput();
+    searchRoot.style.display = '';
 }
 
 function hideAddInput() {
@@ -1432,7 +1451,8 @@ function buildSearchItem(result) {
     text.className = 'search-item-text';
 
     const title = document.createElement('div');
-    title.className = 'search-item-title' + (result.title ? '' : ' no-title');
+    title.className = 'search-item-title' + (result.title ? '' : ' no-title')
+        + (result.kind === 'image' ? ' search-item-title--multiline' : '');
     title.textContent = result.title || (result.kind === 'image' ? 'без названия' : '');
 
     text.appendChild(title);
@@ -1441,11 +1461,6 @@ function buildSearchItem(result) {
         const preview = document.createElement('div');
         preview.className = 'search-item-preview';
         preview.textContent = result.snippet || result.title || '';
-        text.appendChild(preview);
-    } else {
-        const preview = document.createElement('div');
-        preview.className = 'search-item-preview';
-        preview.textContent = 'картинка';
         text.appendChild(preview);
     }
 
