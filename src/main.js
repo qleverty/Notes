@@ -14,6 +14,59 @@ let contentBudgetUsed = 0;
 
 marked.setOptions({ breaks: true, gfm: true });
 
+// =============================================
+// NOTE SCRIPTS  ({{script ...}} blocks)
+// -----------------------------------------------
+// Fully unsandboxed by design (single-user local app):
+// scripts run with full page privileges, including
+// window.__TAURI__.core.invoke(...) access to every
+// backend command. No trust/permission system yet —
+// planned for later, see runScriptBlocks() call site.
+// =============================================
+
+// Matches {{script ... }} (non-greedy, spans multiple lines)
+const SCRIPT_BLOCK_RE = /\{\{script([\s\S]*?)\}\}/g;
+
+function extractScriptBlocks(rawMarkdown) {
+    const blocks = [];
+    let m;
+    SCRIPT_BLOCK_RE.lastIndex = 0;
+    while ((m = SCRIPT_BLOCK_RE.exec(rawMarkdown)) !== null) {
+        blocks.push({ full: m[0], body: m[1] });
+    }
+    return blocks;
+}
+
+// Runs every {{script}} block found in rawMarkdown and returns
+// a new string with each block replaced by its result.
+// rawMarkdown itself is NEVER mutated — the source stays intact
+// so the script re-runs next time the note loads/loses focus.
+async function runScriptBlocks(rawMarkdown) {
+    if (!rawMarkdown || !rawMarkdown.includes('{{script')) return rawMarkdown;
+
+    const blocks = extractScriptBlocks(rawMarkdown);
+    let result = rawMarkdown;
+
+    for (const block of blocks) {
+        let output;
+        try {
+            // new Function (not eval): runs in its own scope, not the
+            // caller's local scope, so it can't accidentally shadow
+            // renderer-internal variables. Wrapped in an async IIFE so
+            // `await fetch(...)` etc. works inside the block body.
+            const run = new Function(`return (async () => {\n${block.body}\n})();`);
+            const value = await run();
+            output = value === undefined ? '' : String(value);
+        } catch (err) {
+            console.error('Note script error:', err);
+            output = '⚠ Ошибка выполнения скрипта';
+        }
+        result = result.replace(block.full, output);
+    }
+
+    return result;
+}
+
 function applyTransform() {
     canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
     updateVisibleNotes();
@@ -472,6 +525,16 @@ function setupNoteEvents(el, id) {
     const colorHandle    = el.querySelector('.color-handle');
 
     // ── Content editing ──
+    // A click on the (custom-styled) scrollbar is still, physically, a
+    // mousedown on .note-content itself — so without this it would focus
+    // the element and flip it into raw-markdown edit mode instead of
+    // letting the browser handle the scrollbar drag/track-click.
+    content.addEventListener('mousedown', (e) => {
+        const scrollbarWidth = content.offsetWidth - content.clientWidth;
+        if (scrollbarWidth > 0 && e.offsetX >= content.clientWidth) {
+            e.preventDefault(); // stops focus/caret placement, not the scrollbar itself
+        }
+    });
     content.addEventListener('focus', () => {
         content.style.whiteSpace = 'pre-wrap';
         content.innerText = noteData.rawMarkdown ?? '';
@@ -479,7 +542,7 @@ function setupNoteEvents(el, id) {
     content.addEventListener('blur', () => {
         noteData.rawMarkdown = content.innerText;
         content.style.whiteSpace = 'normal';
-        content.innerHTML = marked.parse(noteData.rawMarkdown);
+        renderNoteContent(noteData); // async: runs {{script}} blocks, then marked.parse()
     });
     content.addEventListener('input', () => {
         saveBuffer.schedule(noteId, title.innerText, content.innerText);
@@ -798,6 +861,7 @@ function createNoteShell(slot, imageData = null) {
         kind,
         slot:        { ...slot },
         rawMarkdown: null,
+        renderGen:   0, // bumped on each render; lets a stale async render bail out
         bodyLoaded:  false,
         srcLoaded:   false,
         imageTitle:  null,
@@ -944,11 +1008,22 @@ function rectsOverlap(a, b) {
            a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
-function renderNoteContent(noteData) {
+async function renderNoteContent(noteData) {
     const content = noteData.el.querySelector('.note-content');
     if (!content || document.activeElement === content) return;
+
+    // Mark this render as "current". If the note is focused/blurred again
+    // (or reloaded) before our await finishes, a newer call will bump this
+    // again and we bail out below instead of clobbering fresher content.
+    const myGen = ++noteData.renderGen;
+
+    const processed = await runScriptBlocks(noteData.rawMarkdown);
+
+    if (noteData.renderGen !== myGen) return;       // a newer render superseded us
+    if (document.activeElement === content) return; // user started editing meanwhile
+
     content.style.whiteSpace = 'normal';
-    content.innerHTML = marked.parse(noteData.rawMarkdown);
+    content.innerHTML = marked.parse(processed);
 }
 
 async function loadNoteBody(id, noteData) {
