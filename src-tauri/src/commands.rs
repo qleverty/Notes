@@ -311,10 +311,11 @@ pub fn delete_wire(state: State<AppState>, id: u64) -> Result<(), String> {
 
 #[derive(Serialize)]
 pub struct SearchResultDto {
-    pub id:      u64,
-    pub kind:    String,
-    pub title:   String,
-    pub snippet: String,
+    pub id:        u64,
+    pub kind:      String,
+    pub title:     String,
+    pub snippet:   String,
+    pub thumb_b64: Option<String>,
 }
 
 #[tauri::command]
@@ -324,10 +325,11 @@ pub fn search_notes(state: State<AppState>, query: String) -> Result<Vec<SearchR
     proj.file.search(&query)
         .map_err(|e| e.to_string())
         .map(|results| results.into_iter().map(|r| SearchResultDto {
-            id:      r.id,
-            kind:    match r.kind { notes_api::ElementKind::Note => "note", notes_api::ElementKind::Image => "image" }.into(),
-            title:   r.title,
-            snippet: r.snippet,
+            id:        r.id,
+            kind:      match r.kind { notes_api::ElementKind::Note => "note", notes_api::ElementKind::Image => "image" }.into(),
+            title:     r.title,
+            snippet:   r.snippet,
+            thumb_b64: r.thumb.map(|b| STANDARD.encode(b)),
         }).collect())
 }
 
@@ -362,11 +364,13 @@ pub fn create_image(
     mime: String,
     title: String,
     data_b64: String,
+    thumb_b64: Option<String>,
 ) -> Result<u64, String> {
     let data = STANDARD.decode(&data_b64).map_err(|e| e.to_string())?;
+    let thumb = thumb_b64.map(|b| STANDARD.decode(&b)).transpose().map_err(|e| e.to_string())?;
     let mut lock = state.current.lock().unwrap();
     let proj = lock.as_mut().ok_or("No project open")?;
-    proj.file.create_image(x, y, w, h, &mime, &data, &title, color)
+    proj.file.create_image(x, y, w, h, &mime, &data, thumb.as_deref(), &title, color)
         .map_err(|e| e.to_string())
 }
 

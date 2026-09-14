@@ -810,6 +810,30 @@ function extractImageColor(mime, dataB64) {
     });
 }
 
+// Small fixed-size JPEG preview, stored once at creation time and shown
+// in search results — kept tiny (~96px) and compressed so it doesn't
+// meaningfully grow the .notes file even with hundreds of images.
+const THUMB_MAX_SIDE = 96;
+
+function makeThumbnail(mime, dataB64) {
+    return new Promise(res => {
+        const img = new Image();
+        img.onload = () => {
+            const scale = THUMB_MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight);
+            const w = Math.max(1, Math.round(img.naturalWidth  * scale));
+            const h = Math.max(1, Math.round(img.naturalHeight * scale));
+            const c = document.createElement('canvas');
+            c.width = w; c.height = h;
+            c.getContext('2d').drawImage(img, 0, 0, w, h);
+            const dataUrl = c.toDataURL('image/jpeg', 0.7);
+            c.width = 0;
+            res(dataUrl.split(',')[1]);
+        };
+        img.onerror = () => res(null);
+        img.src = `data:${mime};base64,${dataB64}`;
+    });
+}
+
 async function createImageNote(file) {
     const dataB64 = await new Promise((res, rej) => {
         const reader = new FileReader();
@@ -837,9 +861,10 @@ async function createImageNote(file) {
 
     try {
         const color = await extractImageColor(mime, dataB64);
+        const thumbB64 = await makeThumbnail(mime, dataB64);
         const id = await invoke('create_image', {
             x: cx, y: cy, w: noteW, h: noteH,
-            color, mime, title: '', dataB64,
+            color, mime, title: '', dataB64, thumbB64,
         });
         createNoteShell(
             { id, kind: 'image', x: cx, y: cy, w: noteW, h: noteH, color },
@@ -1443,7 +1468,15 @@ function buildSearchItem(result) {
     if (result.kind === 'image') {
         const thumb = document.createElement('div');
         thumb.className = 'search-item-thumb';
-        thumb.innerHTML = '<svg width="22" height="18" viewBox="0 0 40 32"><rect x="2" y="2" width="36" height="28" rx="1" stroke="#555" stroke-width="2.5" fill="none"/><circle cx="13" cy="12" r="4" fill="#555"/><polyline points="2,26 14,16 22,22 30,12 38,20 38,30 2,30" fill="#555" opacity="0.5"/></svg>';
+        if (result.thumb_b64) {
+            const img = document.createElement('img');
+            img.src = `data:image/jpeg;base64,${result.thumb_b64}`;
+            img.alt = '';
+            thumb.appendChild(img);
+        } else {
+            // Fallback for images created before thumbnails existed
+            thumb.innerHTML = '<svg width="22" height="18" viewBox="0 0 40 32"><rect x="2" y="2" width="36" height="28" rx="1" stroke="#555" stroke-width="2.5" fill="none"/><circle cx="13" cy="12" r="4" fill="#555"/><polyline points="2,26 14,16 22,22 30,12 38,20 38,30 2,30" fill="#555" opacity="0.5"/></svg>';
+        }
         body.appendChild(thumb);
     }
 

@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS images (
     color_b INTEGER NOT NULL,
     title   TEXT NOT NULL DEFAULT '',
     mime    TEXT NOT NULL,
-    data    BLOB NOT NULL
+    data    BLOB NOT NULL,
+    thumb_data BLOB
 );
 CREATE TABLE IF NOT EXISTS wires (
     id        INTEGER PRIMARY KEY,
@@ -153,14 +154,14 @@ impl NotesFile {
         Ok(id)
     }
 
-    pub fn create_image(&mut self, x: i64, y: i64, w: i64, h: i64, mime: &str, data: &[u8], title: &str, color: [u8; 3]) -> Result<u64> {
+    pub fn create_image(&mut self, x: i64, y: i64, w: i64, h: i64, mime: &str, data: &[u8], thumb: Option<&[u8]>, title: &str, color: [u8; 3]) -> Result<u64> {
         if title.len() > 255 { return Err(NotsError::TitleTooLong); }
         let [r, g, b] = color.map(|c| c as i64);
         let tx = self.conn.transaction()?;
         let id = Self::reserve_id(&tx, "image")?;
         tx.execute(
-            "INSERT INTO images (id,x,y,w,h,color_r,color_g,color_b,title,mime,data) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
-            params![id as i64, x, y, w, h, r, g, b, title, mime, data],
+            "INSERT INTO images (id,x,y,w,h,color_r,color_g,color_b,title,mime,data,thumb_data) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+            params![id as i64, x, y, w, h, r, g, b, title, mime, data, thumb],
         )?;
         tx.commit()?;
         self.slots.push(SlotInfo { id, kind: ElementKind::Image, x, y, w, h, color });
@@ -262,6 +263,10 @@ impl NotesFile {
                 CASE note_kind
                     WHEN 'note' THEN (SELECT SUBSTR(body, 1, 150) FROM notes WHERE id = note_id)
                     ELSE ''
+                END,
+                CASE note_kind
+                    WHEN 'image' THEN (SELECT thumb_data FROM images WHERE id = note_id)
+                    ELSE NULL
                 END
              FROM search WHERE search MATCH ?1 ORDER BY rank"
         )?;
@@ -270,10 +275,11 @@ impl NotesFile {
             let kind_str: String = row.get(1)?;
             let title: String    = row.get(2)?;
             let snippet: String  = row.get(3)?;
-            Ok((id as u64, kind_str, title, snippet))
-        })?.filter_map(|r| r.ok()).map(|(id, kind_str, title, snippet)| {
+            let thumb: Option<Vec<u8>> = row.get(4)?;
+            Ok((id as u64, kind_str, title, snippet, thumb))
+        })?.filter_map(|r| r.ok()).map(|(id, kind_str, title, snippet, thumb)| {
             let kind = if kind_str == "image" { ElementKind::Image } else { ElementKind::Note };
-            SearchResult { id, kind, title, snippet }
+            SearchResult { id, kind, title, snippet, thumb }
         }).collect();
         Ok(results)
     }

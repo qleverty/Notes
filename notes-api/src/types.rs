@@ -43,7 +43,7 @@ pub struct Image { pub id: u64, pub mime: String, pub data: Vec<u8>, pub title: 
 pub struct ImageMeta { pub id: u64, pub mime: String, pub title: String }
 
 #[derive(Debug, Clone)]
-pub struct SearchResult { pub id: u64, pub kind: ElementKind, pub title: String, pub snippet: String }
+pub struct SearchResult { pub id: u64, pub kind: ElementKind, pub title: String, pub snippet: String, pub thumb: Option<Vec<u8>> }
 
 #[derive(Debug)]
 pub enum NotsError {

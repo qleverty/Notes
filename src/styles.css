@@ -468,6 +468,7 @@ body.thread-dragging * { cursor: crosshair !important; }
     display: flex; align-items: center; justify-content: center;
 }
 .search-item-thumb svg { opacity: 0.3; }
+.search-item-thumb img { width: 100%; height: 100%; object-fit: cover; }
 
 .search-empty {
     padding: 10px 12px;
