@@ -77,12 +77,29 @@ function screenToCanvas(sx, sy) {
 }
 
 // Zoom with wheel (but scroll dropdown list if cursor is inside it)
+//
+// The `wheel` event never tells us which device produced it, so we
+// guess from the shape of the deltas:
+//   - ctrlKey === true            -> pinch-to-zoom gesture (trackpad or
+//                                     mouse+Ctrl), browsers synthesize
+//                                     this regardless of device.
+//   - deltaX !== 0, or a
+//     fractional deltaY           -> continuous two-finger trackpad
+//                                     scroll -> pan the camera.
+//   - integer deltaY, deltaX === 0 -> discrete mouse-wheel notch -> zoom,
+//                                     same as before.
+function isPanGesture(e) {
+    if (e.ctrlKey) return false;
+    if (e.deltaX !== 0) return true;
+    return !Number.isInteger(e.deltaY);
+}
+
 document.addEventListener('wheel', (e) => {
     e.preventDefault(); // always prevent browser scroll/zoom
 
     const pr = document.getElementById('proj-root');
     if (pr && pr.contains(e.target)) {
-        // Cursor is in dropdown zone — scroll the list, never zoom
+        // Cursor is in dropdown zone — scroll the list, never zoom/pan
         const list = document.getElementById('proj-list');
         if (list) {
             const maxScroll = list.scrollHeight - list.clientHeight;
@@ -95,10 +112,20 @@ document.addEventListener('wheel', (e) => {
                 }
             }
         }
-        return; // do NOT zoom canvas
+        return; // do NOT zoom/pan canvas
     }
 
-    // Canvas zoom
+    if (isPanGesture(e)) {
+        // Two-finger trackpad drag — move the camera freely in any
+        // direction, same units as the middle-mouse-drag pan below.
+        panX -= e.deltaX;
+        panY -= e.deltaY;
+        applyTransform();
+        updateAnchorPositions();
+        return;
+    }
+
+    // Canvas zoom (mouse wheel, or ctrl+wheel / trackpad pinch)
     const factor = e.deltaY < 0 ? 1.1 : 0.9;
     const newZoom = Math.min(Math.max(zoom * factor, ZOOM_MIN), ZOOM_MAX);
     panX = e.clientX - (e.clientX - panX) * (newZoom / zoom);
