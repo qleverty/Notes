@@ -78,24 +78,17 @@ function screenToCanvas(sx, sy) {
 
 // Zoom with wheel (but scroll dropdown list if cursor is inside it)
 //
-// The `wheel` event never tells us which device produced it, so we
-// guess from the shape of the deltas:
-//   - ctrlKey === true            -> pinch-to-zoom gesture (trackpad or
-//                                     mouse+Ctrl), browsers synthesize
-//                                     this regardless of device.
-//   - deltaX !== 0, or a
-//     fractional deltaY           -> continuous two-finger trackpad
-//                                     scroll -> pan the camera.
-//   - integer deltaY, deltaX === 0 -> discrete mouse-wheel notch -> zoom,
-//                                     same as before.
-function isPanGesture(e) {
-    if (e.ctrlKey) return false;
-    if (e.deltaX !== 0) return true;
-    return !Number.isInteger(e.deltaY);
-}
-
+// TEST BUILD: zoom is Ctrl-only. Everything else (including plain mouse
+// wheel) pans the camera. Logging raw deltas to check whether the
+// browser/OS collapses diagonal trackpad swipes to a single axis before
+// `wheel` ever fires.
 document.addEventListener('wheel', (e) => {
     e.preventDefault(); // always prevent browser scroll/zoom
+
+    console.log('[wheel]', {
+        deltaX: e.deltaX, deltaY: e.deltaY, deltaMode: e.deltaMode,
+        ctrlKey: e.ctrlKey, shiftKey: e.shiftKey,
+    });
 
     const pr = document.getElementById('proj-root');
     if (pr && pr.contains(e.target)) {
@@ -115,9 +108,9 @@ document.addEventListener('wheel', (e) => {
         return; // do NOT zoom/pan canvas
     }
 
-    if (isPanGesture(e)) {
-        // Two-finger trackpad drag — move the camera freely in any
-        // direction, same units as the middle-mouse-drag pan below.
+    if (!e.ctrlKey) {
+        // Pan in any direction — straight from the raw deltas, so we can
+        // see on screen whether diagonal movement actually comes through.
         panX -= e.deltaX;
         panY -= e.deltaY;
         applyTransform();
@@ -125,7 +118,7 @@ document.addEventListener('wheel', (e) => {
         return;
     }
 
-    // Canvas zoom (mouse wheel, or ctrl+wheel / trackpad pinch)
+    // Ctrl+wheel — zoom
     const factor = e.deltaY < 0 ? 1.1 : 0.9;
     const newZoom = Math.min(Math.max(zoom * factor, ZOOM_MIN), ZOOM_MAX);
     panX = e.clientX - (e.clientX - panX) * (newZoom / zoom);
